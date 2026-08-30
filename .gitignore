@@ -1,0 +1,10 @@
+# local input/output data (PDFs and extracted text) — not meant for git
+data/
+*.pdf
+*.txt
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
