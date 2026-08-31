@@ -1,24 +1,29 @@
 """
 Convert a PDF into a cleaned .txt file, stripping headers/footers and
-footnotes based on vertical position and font size.
+footnotes based on vertical position and font size. Also detects heading
+candidates (font noticeably larger than body text) and saves them, along
+with page counts and detection settings, to a sidecar .meta.json file for
+downstream use (e.g. chunking.py's structure-based splitting).
 
 Usage:
     python convert_pdf_to_text.py path/to/file.pdf
     python convert_pdf_to_text.py path/to/file.pdf -o path/to/output.txt
     python convert_pdf_to_text.py path/to/file.pdf --min-font-size 9
+    python convert_pdf_to_text.py path/to/file.pdf --heading-ratio 1.2
 """
 
 import argparse
+import json
 from collections import Counter
 from pathlib import Path
 
 import pymupdf  # pymupdf
 
 
-def auto_detect_body_font_size(path, sample_pages=5):
+def detect_body_font_size(path, sample_pages=5):
     """Guess the main body-text font size by finding the size with the most
     characters across a sample of pages. Footnotes/captions are almost
-    always smaller than this, so it's a good default filter threshold.
+    always smaller than this, headings are almost always bigger.
     """
     doc = pymupdf.open(path)
     char_counts_by_size = Counter()
@@ -41,28 +46,43 @@ def auto_detect_body_font_size(path, sample_pages=5):
     if not char_counts_by_size:
         return 9.0  # fallback if nothing was found
 
-    body_size = char_counts_by_size.most_common(1)[0][0]
-    # keep the body size itself and anything bigger (headings); footnotes
-    # are typically ~1-2pt smaller, so cut just below the body size
-    return round(body_size - 0.5, 1)
+    return char_counts_by_size.most_common(1)[0][0]
 
 
-def extract_text_with_filters(path, min_font_size=None, y_margin_top=0.15, y_margin_bottom=0.85):
-    """Extract text from a PDF with font-size and position filters.
+def extract_text_with_filters(
+    path,
+    min_font_size=None,
+    y_margin_top=0.15,
+    y_margin_bottom=0.85,
+    heading_ratio=1.15,
+    max_heading_words=12,
+):
+    """Extract text from a PDF with font-size and position filters, and
+    collect heading candidates + page-level metadata along the way.
 
     - Lines outside the [y_margin_top, y_margin_bottom] band of the page
       height are dropped (removes running headers/footers).
-    - Spans smaller than min_font_size are dropped (removes footnotes).
+    - Spans smaller than min_font_size are dropped from the body text
+      (removes footnotes).
     - Line breaks are preserved, so paragraph structure survives.
+    - Any line whose largest span is >= body_font_size * heading_ratio,
+      and short enough to plausibly be a title (<= max_heading_words),
+      is recorded as a heading candidate with its page number.
+
+    Returns (text, metadata) where metadata is a dict ready to be saved
+    as JSON.
     """
+    body_font_size = detect_body_font_size(path)
+
     if min_font_size is None:
-        min_font_size = auto_detect_body_font_size(path)
+        min_font_size = round(body_font_size - 0.5, 1)
         print(f"Auto-detected min_font_size: {min_font_size}")
 
     doc = pymupdf.open(path)
     pages_text = []
+    headings = []
 
-    for page in doc:
+    for page_index, page in enumerate(doc):
         height = page.rect.height
         blocks = page.get_text("dict")["blocks"]
         page_lines = []
@@ -78,19 +98,55 @@ def extract_text_with_filters(path, min_font_size=None, y_margin_top=0.15, y_mar
                 if not (y_margin_top * height < y < y_margin_bottom * height):
                     continue
 
-                # filter by font size (remove footnotes), keep line breaks
+                spans = line.get("spans", [])
+                if not spans:
+                    continue
+
+                max_span_size = max(
+                    (s["size"] for s in spans if s.get("size") is not None),
+                    default=0,
+                )
+                line_text_raw = "".join(s.get("text", "") for s in spans).strip()
+
+                # heading candidate: noticeably bigger font than body, short line
+                if (
+                    line_text_raw
+                    and max_span_size >= body_font_size * heading_ratio
+                    and len(line_text_raw.split()) <= max_heading_words
+                ):
+                    headings.append({
+                        "text": line_text_raw,
+                        "page": page_index + 1,
+                        "font_size": round(max_span_size, 1),
+                    })
+
+                # body text: font-size filter (removes footnotes), keep line breaks
                 line_spans = [
-                    span["text"]
-                    for span in line.get("spans", [])
-                    if span.get("size") is not None and span["size"] >= min_font_size
+                    s["text"] for s in spans
+                    if s.get("size") is not None and s["size"] >= min_font_size
                 ]
                 if line_spans:
                     page_lines.append(" ".join(line_spans))
 
         pages_text.append("\n".join(page_lines))
 
+    num_pages = doc.page_count
     doc.close()
-    return "\n\n".join(pages_text)  # blank line between pages
+
+    text = "\n\n".join(pages_text)  # blank line between pages
+
+    metadata = {
+        "source_pdf": str(path),
+        "num_pages": num_pages,
+        "body_font_size": body_font_size,
+        "min_font_size_used": min_font_size,
+        "y_margin_top": y_margin_top,
+        "y_margin_bottom": y_margin_bottom,
+        "heading_ratio": heading_ratio,
+        "headings": headings,
+    }
+
+    return text, metadata
 
 
 def save_text_to_file(text, filename):
@@ -99,9 +155,16 @@ def save_text_to_file(text, filename):
         file.write(text)
 
 
+def save_metadata_to_file(metadata, filename):
+    Path(filename).parent.mkdir(parents=True, exist_ok=True)
+    with open(filename, "w", encoding="utf-8") as file:
+        json.dump(metadata, file, ensure_ascii=False, indent=2)
+
+
 def inspect_font_sizes(path, num_pages=1):
     """Print font size/font/y-position for each span, useful for manually
-    picking a min_font_size threshold if auto-detection needs a sanity check.
+    picking a min_font_size or heading_ratio if auto-detection needs a
+    sanity check.
     """
     doc = pymupdf.open(path)
 
@@ -125,7 +188,7 @@ def inspect_font_sizes(path, num_pages=1):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Extract cleaned body text from a PDF.")
+    parser = argparse.ArgumentParser(description="Extract cleaned body text (+ heading/page metadata) from a PDF.")
     parser.add_argument("input", type=Path, help="Path to the input PDF file.")
     parser.add_argument(
         "-o", "--output", type=Path, default=None,
@@ -133,7 +196,7 @@ def main():
     )
     parser.add_argument(
         "--min-font-size", type=float, default=None,
-        help="Minimum font size to keep. If omitted, it's auto-detected from the PDF."
+        help="Minimum font size to keep in body text. If omitted, it's auto-detected from the PDF."
     )
     parser.add_argument(
         "--y-margin-top", type=float, default=0.15,
@@ -142,6 +205,18 @@ def main():
     parser.add_argument(
         "--y-margin-bottom", type=float, default=0.85,
         help="Bottom margin fraction of page height to exclude below (default: 0.85)."
+    )
+    parser.add_argument(
+        "--heading-ratio", type=float, default=1.15,
+        help="A line is a heading candidate if its font size >= body_font_size * this ratio (default: 1.15)."
+    )
+    parser.add_argument(
+        "--max-heading-words", type=int, default=12,
+        help="Max word count for a line to still qualify as a heading candidate (default: 12)."
+    )
+    parser.add_argument(
+        "--no-metadata", action="store_true",
+        help="Skip writing the .meta.json sidecar file; only write the .txt output."
     )
     parser.add_argument(
         "--inspect", action="store_true",
@@ -155,14 +230,21 @@ def main():
 
     output_path = args.output or args.input.with_suffix(".txt")
 
-    text = extract_text_with_filters(
+    text, metadata = extract_text_with_filters(
         args.input,
         min_font_size=args.min_font_size,
         y_margin_top=args.y_margin_top,
         y_margin_bottom=args.y_margin_bottom,
+        heading_ratio=args.heading_ratio,
+        max_heading_words=args.max_heading_words,
     )
     save_text_to_file(text, output_path)
-    print(f"Done. Saved to {output_path}")
+    print(f"Done. Saved text to {output_path}")
+
+    if not args.no_metadata:
+        meta_path = output_path.with_suffix(".meta.json")
+        save_metadata_to_file(metadata, meta_path)
+        print(f"Saved metadata ({len(metadata['headings'])} heading candidates) to {meta_path}")
 
 
 if __name__ == "__main__":
