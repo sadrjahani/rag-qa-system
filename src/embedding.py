@@ -57,6 +57,11 @@ class EmbeddingModel:
         if not texts:
             raise ValueError("Cannot embed an empty list of texts.")
         logger.info("Encoding %d chunk(s).", len(texts))
+        # normalize_embeddings=True already L2-normalizes here, so vectors
+        # arriving in FAISSVectorStore.add_documents are normalized once,
+        # by this method. The second normalize_L2 call there is a defensive
+        # no-op for these vectors, kept in case add_documents is ever called
+        # with embeddings from a different source that skipped this step.
         embeddings = self.model.encode(
             texts,
             batch_size=batch_size,
@@ -98,8 +103,18 @@ class FAISSVectorStore:
                 f"Expected embeddings with shape (n, {self.dimension}), received {embeddings.shape}."
             )
 
-        vectors = np.ascontiguousarray(embeddings, dtype=np.float32)
-        # Normalized inner product is cosine similarity.
+        # copy=True guarantees this is a fresh array: np.ascontiguousarray
+        # would return the *same* object (no copy) when embeddings is
+        # already contiguous float32, and normalize_L2 mutates in place —
+        # without the copy, callers who keep a reference to the original
+        # `embeddings` array after calling add_documents() would see it
+        # silently mutated too.
+        vectors = np.array(embeddings, dtype=np.float32, copy=True)
+        # Defensive: normalizes again even though EmbeddingModel.encode_batch
+        # already returns L2-normalized vectors. Renormalizing an already-
+        # unit-length vector is a no-op, so this only matters if
+        # add_documents is ever called with embeddings from somewhere else
+        # that didn't normalize. Normalized inner product == cosine similarity.
         faiss.normalize_L2(vectors)
         self._index.add(vectors)
         self._documents.extend(documents)
