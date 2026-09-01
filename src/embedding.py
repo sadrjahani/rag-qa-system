@@ -11,34 +11,17 @@ Example:
 import argparse
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import faiss
 import numpy as np
-from dotenv import find_dotenv, load_dotenv
 from sentence_transformers import SentenceTransformer
 
+from config import Config
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class Config:
-    embedding_model_name: str
-    embedding_dimension: int | None
-    log_level: str
-
-    @classmethod
-    def from_env(cls) -> "Config":
-        load_dotenv(find_dotenv())
-        raw_dimension = os.getenv("EMBEDDING_DIMENSION")
-        return cls(
-            embedding_model_name=os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2"),
-            embedding_dimension=int(raw_dimension) if raw_dimension else None,
-            log_level=os.getenv("LOG_LEVEL", "INFO"),
-        )
 
 
 @dataclass

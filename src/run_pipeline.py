@@ -20,6 +20,7 @@ from pathlib import Path
 import convert_pdf_to_text as pdf_stage
 import chunking as chunking_stage
 import embedding as embedding_stage
+from config import Config
 
 
 def run_pipeline(
@@ -61,7 +62,7 @@ def run_pipeline(
 
     # --- Stage 3: chunks -> embeddings -> FAISS vector database ---
     print("=== Stage 3/3: embedding chunks and building the vector database ===")
-    config = embedding_stage.Config.from_env()
+    config = Config.from_env()
     resolved_model_name = model_name or config.embedding_model_name
 
     documents = [asdict(chunk) for chunk in chunks]
