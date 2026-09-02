@@ -3,8 +3,11 @@ Run the full rag-qa-system pipeline (PDF -> clean text -> chunks -> vector
 database -> optional retrieval) in one command, by importing and calling the
 actual stage functions directly — no subprocess calls and no repeated flags.
 
-Must be run from the same folder as the other scripts (src/), since it
-imports them as local modules.
+By default, a PDF in ``data/source/`` produces artifacts in:
+
+    data/cleaned/<pdf_stem>.txt and .meta.json
+    data/chunks/<pdf_stem>_chunks.jsonl
+    data/vector_db/<pdf_stem>/
 
 Usage:
     python run_pipeline.py "../data/chapter 6 Rag & Agents.pdf"
@@ -25,6 +28,17 @@ from vector_store import FAISSVectorStore, VectorStoreError
 from Retrieval import FAISSRetriever, print_results, save_results_to_json
 
 
+def default_artifact_directories(pdf_path: Path) -> tuple[Path, Path, Path]:
+    """Return clean, predictable output directories for a source PDF."""
+    source_dir = pdf_path.parent
+    data_dir = source_dir.parent if source_dir.name.lower() == "source" else source_dir
+    return (
+        data_dir / "cleaned",
+        data_dir / "chunks",
+        data_dir / "vector_db" / pdf_path.stem,
+    )
+
+
 def run_pipeline(
     pdf_path: Path,
     chunk_size: int = 400,
@@ -32,19 +46,25 @@ def run_pipeline(
     heading_pattern: str | None = None,
     model_name: str | None = None,
     batch_size: int = 32,
+    cleaned_dir: Path | None = None,
+    chunks_dir: Path | None = None,
     output_dir: Path | None = None,
     query: str | None = None,
     top_k: int = 3,
 ) -> Path:
     """Run PDF extraction, chunking, and embedding. If ``query`` is given,
-    search the newly saved vector database as a final stage. Returns the path
+    search the newly saved vector database as a final stage. Generated text,
+    chunks, and vectors are written to separate directories. Returns the path
     to the saved vector database folder.
     """
     total_stages = 4 if query is not None else 3
-    output_dir = output_dir or pdf_path.with_name(pdf_path.stem + "_vectors")
-    text_path = pdf_path.with_suffix(".txt")
-    meta_path = pdf_path.with_suffix(".meta.json")
-    chunks_path = pdf_path.with_name(pdf_path.stem + "_chunks.jsonl")
+    default_cleaned_dir, default_chunks_dir, default_output_dir = default_artifact_directories(pdf_path)
+    cleaned_dir = cleaned_dir or default_cleaned_dir
+    chunks_dir = chunks_dir or default_chunks_dir
+    output_dir = output_dir or default_output_dir
+    text_path = cleaned_dir / f"{pdf_path.stem}.txt"
+    meta_path = cleaned_dir / f"{pdf_path.stem}.meta.json"
+    chunks_path = chunks_dir / f"{pdf_path.stem}_chunks.jsonl"
 
     # --- Stage 1: PDF -> clean text + heading/page metadata ---
     print(f"=== Stage 1/{total_stages}: extracting text from PDF ===")
@@ -121,7 +141,9 @@ def main():
     )
     parser.add_argument("--model-name", type=str, default=None, help="SentenceTransformer model name (default: from .env, else all-MiniLM-L6-v2).")
     parser.add_argument("--batch-size", type=int, default=32, help="Embedding batch size (default: 32).")
-    parser.add_argument("-o", "--output", type=Path, default=None, help="Output directory for the vector database (default: <pdf_stem>_vectors next to the PDF).")
+    parser.add_argument("--cleaned-dir", type=Path, default=None, help="Directory for cleaned text and metadata (default: data/cleaned for PDFs in data/source).")
+    parser.add_argument("--chunks-dir", type=Path, default=None, help="Directory for chunk JSONL files (default: data/chunks for PDFs in data/source).")
+    parser.add_argument("-o", "--output", type=Path, default=None, help="Vector database directory (default: data/vector_db/<pdf_stem> for PDFs in data/source).")
     parser.add_argument("--query", type=str, default=None, help="Optional question to search after building the vector database.")
     parser.add_argument("--top-k", type=int, default=3, help="Number of chunks to return for --query (default: 3).")
     args = parser.parse_args()
@@ -146,6 +168,8 @@ def main():
         heading_pattern=args.heading_pattern,
         model_name=args.model_name,
         batch_size=args.batch_size,
+        cleaned_dir=args.cleaned_dir,
+        chunks_dir=args.chunks_dir,
         output_dir=args.output,
         query=args.query,
         top_k=args.top_k,
