@@ -21,7 +21,7 @@ import convert_pdf_to_text as pdf_stage
 import chunking as chunking_stage
 from config import Config
 from embedding_model import EmbeddingModel
-from vector_store import FAISSVectorStore
+from vector_store import FAISSVectorStore, VectorStoreError
 from Retrieval import FAISSRetriever, print_results, save_results_to_json
 
 
@@ -76,6 +76,15 @@ def run_pipeline(
     embeddings = embedder.encode_batch([doc["text"] for doc in documents], batch_size)
 
     actual_dimension = int(embeddings.shape[1])
+    if (
+        config.embedding_dimension is not None
+        and config.embedding_dimension != actual_dimension
+    ):
+        raise VectorStoreError(
+            "EMBEDDING_DIMENSION does not match the selected model: "
+            f"{config.embedding_dimension} != {actual_dimension}. "
+            "Correct the value in .env before building the database."
+        )
     store = FAISSVectorStore(dimension=actual_dimension)
     store.add_documents(documents, embeddings)
     store.save(output_dir, resolved_model_name)
