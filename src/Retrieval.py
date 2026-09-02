@@ -13,15 +13,15 @@ Example:
 import argparse
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import faiss
 
 from config import Config
-from embedding import EmbeddingModel, VectorStoreError, read_chunks_from_jsonl
-
+from embedding_model import EmbeddingModel
+from vector_store import VectorStoreError, read_chunks_from_jsonl
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,15 @@ class FAISSRetriever:
     index: faiss.Index
     documents: list[dict[str, Any]]
     model_name: str
+    _embedder: EmbeddingModel = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        # Built once per FAISSRetriever instance (not per retrieve() call),
+        # so EmbeddingModel's own lazy-load cache (see embedding_model.py)
+        # actually pays off: the SentenceTransformer model loads on the
+        # first retrieve() call and is reused for every one after that,
+        # instead of being reloaded from disk on every single query.
+        self._embedder = EmbeddingModel(self.model_name)
 
     @classmethod
     def load(cls, database_dir: Path) -> "FAISSRetriever":
@@ -110,8 +119,7 @@ class FAISSRetriever:
         if top_k <= 0:
             raise ValueError("top_k must be positive.")
 
-        embedder = EmbeddingModel(self.model_name)
-        query_vector = embedder.encode_batch([question])
+        query_vector = self._embedder.encode_batch([question])
         if query_vector.shape[1] != self.index.d:
             raise VectorStoreError(
                 "Query embedding dimension does not match the FAISS index: "
@@ -139,6 +147,44 @@ class FAISSRetriever:
         return results
 
 
+def print_results(query: str, results: list[RetrievedChunk]) -> None:
+    """Shared console output, used by both this script's CLI and run_pipeline.py."""
+    print(f"\nResults for: {query}\n")
+    for rank, result in enumerate(results, start=1):
+        print(f"{rank}. Score: {result.score:.4f}")
+        if result.source:
+            print(f"   Source: {result.source}")
+        print(f"   Section: {result.section}")
+        if result.page is not None:
+            print(f"   Page: {result.page}")
+        print(f"   Chunk ID: {result.chunk_id}")
+        print(f"   Text: {result.text}\n")
+
+
+def save_results_to_json(query: str, results: list[RetrievedChunk], path: Path) -> None:
+    """Persist retrieval results so they can be reused later — e.g. for
+    building a RAGAS golden set or comparing before/after an iteration
+    change, instead of only being visible in the terminal once.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "query": query,
+        "results": [
+            {
+                "score": r.score,
+                "text": r.text,
+                "section": r.section,
+                "chunk_id": r.chunk_id,
+                "page": r.page,
+                "source": r.source,
+            }
+            for r in results
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    logger.info("Saved %d result(s) to %s", len(results), path)
+
+
 def main() -> None:
     config = Config.from_env()
     parser = argparse.ArgumentParser(
@@ -153,6 +199,10 @@ def main() -> None:
     parser.add_argument(
         "--top-k", type=int, default=3, help="Number of chunks to return (default: 3)."
     )
+    parser.add_argument(
+        "--save", type=Path, default=None,
+        help="Optional path to save results as JSON (e.g. database_dir/query_results.json)."
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -165,16 +215,11 @@ def main() -> None:
     except (ValueError, VectorStoreError) as exc:
         parser.error(str(exc))
 
-    print(f"\nResults for: {args.question}\n")
-    for rank, result in enumerate(results, start=1):
-        print(f"{rank}. Score: {result.score:.4f}")
-        if result.source:
-            print(f"   Source: {result.source}")
-        print(f"   Section: {result.section}")
-        if result.page is not None:
-            print(f"   Page: {result.page}")
-        print(f"   Chunk ID: {result.chunk_id}")
-        print(f"   Text: {result.text}\n")
+    print_results(args.question, results)
+
+    if args.save is not None:
+        save_results_to_json(args.question, results, args.save)
+        print(f"Saved results to {args.save}")
 
 
 if __name__ == "__main__":

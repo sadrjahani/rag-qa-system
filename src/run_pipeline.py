@@ -3,8 +3,8 @@ Run the full rag-qa-system pipeline (PDF -> clean text -> chunks -> vector
 database -> optional retrieval) in one command, by importing and calling the
 actual stage functions directly — no subprocess calls and no repeated flags.
 
-Must be run from the same folder as the other three scripts (src/), since
-it imports them as local modules.
+Must be run from the same folder as the other scripts (src/), since it
+imports them as local modules.
 
 Usage:
     python run_pipeline.py "../data/chapter 6 Rag & Agents.pdf"
@@ -19,9 +19,10 @@ from pathlib import Path
 
 import convert_pdf_to_text as pdf_stage
 import chunking as chunking_stage
-import embedding as embedding_stage
-from Retrieval import FAISSRetriever
 from config import Config
+from embedding_model import EmbeddingModel
+from vector_store import FAISSVectorStore
+from Retrieval import FAISSRetriever, print_results, save_results_to_json
 
 
 def run_pipeline(
@@ -39,13 +40,14 @@ def run_pipeline(
     search the newly saved vector database as a final stage. Returns the path
     to the saved vector database folder.
     """
+    total_stages = 4 if query is not None else 3
     output_dir = output_dir or pdf_path.with_name(pdf_path.stem + "_vectors")
     text_path = pdf_path.with_suffix(".txt")
     meta_path = pdf_path.with_suffix(".meta.json")
     chunks_path = pdf_path.with_name(pdf_path.stem + "_chunks.jsonl")
 
     # --- Stage 1: PDF -> clean text + heading/page metadata ---
-    print("=== Stage 1/3: extracting text from PDF ===")
+    print(f"=== Stage 1/{total_stages}: extracting text from PDF ===")
     text, metadata = pdf_stage.extract_text_with_filters(pdf_path)
     pdf_stage.save_text_to_file(text, text_path)
     pdf_stage.save_metadata_to_file(metadata, meta_path)
@@ -53,7 +55,7 @@ def run_pipeline(
     print(f"Saved metadata ({len(metadata['headings'])} heading candidates) to {meta_path}\n")
 
     # --- Stage 2: clean text -> chunks ---
-    print("=== Stage 2/3: chunking text ===")
+    print(f"=== Stage 2/{total_stages}: chunking text ===")
     chunks = chunking_stage.chunk_document(
         text,
         chunk_size=chunk_size,
@@ -65,34 +67,30 @@ def run_pipeline(
     print(f"Created {len(chunks)} chunks, saved to {chunks_path}\n")
 
     # --- Stage 3: chunks -> embeddings -> FAISS vector database ---
-    print("=== Stage 3/3: embedding chunks and building the vector database ===")
+    print(f"=== Stage 3/{total_stages}: embedding chunks and building the vector database ===")
     config = Config.from_env()
     resolved_model_name = model_name or config.embedding_model_name
 
     documents = [asdict(chunk) for chunk in chunks]
-    embedder = embedding_stage.EmbeddingModel(resolved_model_name)
+    embedder = EmbeddingModel(resolved_model_name)
     embeddings = embedder.encode_batch([doc["text"] for doc in documents], batch_size)
 
     actual_dimension = int(embeddings.shape[1])
-    store = embedding_stage.FAISSVectorStore(dimension=actual_dimension)
+    store = FAISSVectorStore(dimension=actual_dimension)
     store.add_documents(documents, embeddings)
     store.save(output_dir, resolved_model_name)
     print(f"Built a vector database with {store.size} chunks: {output_dir}\n")
 
+    # --- Stage 4 (optional): retrieve and save results ---
     if query is not None:
-        print("=== Stage 4/4: retrieving relevant chunks ===")
+        print(f"=== Stage 4/{total_stages}: retrieving relevant chunks ===")
         retriever = FAISSRetriever.load(output_dir)
         results = retriever.retrieve(query, top_k)
-        print(f"\nResults for: {query}\n")
-        for rank, result in enumerate(results, start=1):
-            print(f"{rank}. Score: {result.score:.4f}")
-            if result.source:
-                print(f"   Source: {result.source}")
-            print(f"   Section: {result.section}")
-            if result.page is not None:
-                print(f"   Page: {result.page}")
-            print(f"   Chunk ID: {result.chunk_id}")
-            print(f"   Text: {result.text}\n")
+        print_results(query, results)
+
+        results_path = output_dir / "query_results.json"
+        save_results_to_json(query, results, results_path)
+        print(f"Saved results to {results_path}\n")
 
     print("=== Pipeline complete ===")
     print(f"  Text:     {text_path}")
