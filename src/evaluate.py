@@ -25,8 +25,12 @@ from config import Config
 from ollama_client import OllamaClient, OllamaError
 from Retrieval import FAISSRetriever
 from vector_store import VectorStoreError
+from ragas_nonllm_eval import evaluate_with_ragas_nonllm, load_golden_set_with_contexts
 
 logger = logging.getLogger(__name__)
+
+
+
 
 
 def load_golden_set(path: Path) -> list[dict[str, Any]]:
@@ -165,6 +169,7 @@ def evaluate_with_ollama(records: list[dict[str, Any]], retriever: FAISSRetrieve
             f"Reference answer: {record['ground_truth']}\n"
             f"Context:\n{context}\n"
             f"Generated answer: {answer}"
+            
         )
         scores = parse_judge_response(client.generate(judge_prompt))
         per_question.append({"question": record["question"], "answer": answer, **scores})
@@ -186,8 +191,9 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=3, help="Number of chunks to retrieve per question (default: 3).")
     parser.add_argument("--llm-model", default=None, help="Use Ollama for answer generation and judging (for example, llama3.2:3b).")
     parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama server URL (default: http://localhost:11434).")
-    parser.add_argument("--retrieval-judge", choices=("ragas", "token_overlap"), default="ragas",
+    parser.add_argument("--retrieval-judge", choices=("ragas", "ragas_nonllm", "token_overlap"), default="ragas",
                         help="Retrieval judge: RAGAS or free local token overlap (default: ragas).")
+    
     args = parser.parse_args()
 
     if not args.golden_set.is_file():
@@ -209,6 +215,10 @@ def main() -> None:
     elif args.retrieval_judge == "token_overlap":
         print("Scoring retrieval with local token overlap (context_precision, context_recall)...")
         aggregate_scores, per_question = evaluate_with_token_overlap(records, retriever, args.top_k)
+    elif args.retrieval_judge == "ragas_nonllm":
+        records = load_golden_set_with_contexts(args.golden_set)
+        print("Scoring retrieval with RAGAS non-LLM metrics (free, no model needed)...")
+        aggregate_scores, per_question = evaluate_with_ragas_nonllm(records, retriever, args.top_k)
     else:
         from ragas import evaluate
         from ragas.metrics import context_precision, context_recall
