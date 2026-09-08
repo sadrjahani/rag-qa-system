@@ -1,13 +1,23 @@
 """Evaluate retrieval and generated answers against a golden set.
 
-Each line of the golden set (.jsonl) must have at least a "question" field
-and a ground-truth answer field (either "reference_answer" or "ground_truth").
-By default this script evaluates retrieval with RAGAS. With ``--llm-model`` it
-uses a local Ollama model to generate a grounded answer and a second judge call
-to score correctness, faithfulness, and relevance. Ollama is free to run
-locally and does not require an API key.
+Each line of the golden set (.jsonl) must have at least a "question" field.
+By default (--retrieval-judge ragas_nonllm) this script scores retrieval with
+RAGAS's free, no-LLM metrics (needs a "reference_contexts" field per record).
+"--retrieval-judge ragas" uses full LLM-based RAGAS and requires a paid
+OPENAI_API_KEY — only use this if you're willing to pay; it is NOT the
+default because this project must stay free/local.
+
+With ``--llm-model`` this instead uses a local Ollama model to generate a
+grounded answer and a second judge call to score correctness, faithfulness,
+and relevance. Ollama is free to run locally and does not require an API key.
+This overrides --retrieval-judge, since it evaluates generated answers, not
+retrieval directly. Individual question failures are skipped (logged as
+warnings) rather than aborting the whole run.
 
 Example:
+    python src/evaluate.py data/eval/golden_set_ragas_nonllm.jsonl data/vector_db/AI_Engineering \
+        -o data/eval/retrieval_results.json --top-k 3
+
     python src/evaluate.py data/eval/golden_set.jsonl data/vector_db/AI_Engineering \
         --llm-model llama3.2:3b -o data/eval/llm_results.json --top-k 3
 """
@@ -153,32 +163,42 @@ def evaluate_with_ollama(records: list[dict[str, Any]], retriever: FAISSRetrieve
     per_question = []
     for i, record in enumerate(records, start=1):
         logger.info("Generating and judging question %d/%d", i, len(records))
-        results = retriever.retrieve(record["question"], top_k=top_k)
-        context = "\n\n".join(f"[Context {rank}] {item.text}" for rank, item in enumerate(results, 1))
-        answer = client.generate(
-            "Answer the question using only the context. If the context is insufficient, say so. "
-            "Be concise and include [Context N] citations.\n\n"
-            f"Question: {record['question']}\n\nContext:\n{context}"
-        )
-        judge_prompt = (
-            "You are a strict evaluator of a closed-world RAG system. Return JSON only with three "
-            "numeric scores from 0 to 1: correctness (matches the reference), faithfulness "
-            "(every material claim is supported by context), and relevance (answers the question). "
-            "Do not add markdown or explanation.\n\n"
-            f"Question: {record['question']}\n"
-            f"Reference answer: {record['ground_truth']}\n"
-            f"Context:\n{context}\n"
-            f"Generated answer: {answer}"
-            
-        )
-        scores = parse_judge_response(client.generate(judge_prompt))
-        per_question.append({"question": record["question"], "answer": answer, **scores})
+        try:
+            results = retriever.retrieve(record["question"], top_k=top_k)
+            context = "\n\n".join(f"[Context {rank}] {item.text}" for rank, item in enumerate(results, 1))
+            answer = client.generate(
+                "Answer the question using only the context. If the context is insufficient, say so. "
+                "Be concise and include [Context N] citations.\n\n"
+                f"Question: {record['question']}\n\nContext:\n{context}"
+            )
+            judge_prompt = (
+                "You are a strict evaluator of a closed-world RAG system. Return JSON only with three "
+                "numeric scores from 0 to 1: correctness (matches the reference), faithfulness "
+                "(every material claim is supported by context), and relevance (answers the question). "
+                "Do not add markdown or explanation.\n\n"
+                f"Question: {record['question']}\n"
+                f"Reference answer: {record['ground_truth']}\n"
+                f"Context:\n{context}\n"
+                f"Generated answer: {answer}"
+            )
+            scores = parse_judge_response(client.generate(judge_prompt))
+            per_question.append({"question": record["question"], "answer": answer, **scores})
+        except OllamaError as exc:
+            logger.warning("Skipping question %d/%d due to error: %s", i, len(records), exc)
+            continue
+
+    if not per_question:
+        raise VectorStoreError("No questions were successfully evaluated with Ollama.")
 
     aggregate = {
         metric: sum(row[metric] for row in per_question) / len(per_question)
         for metric in ("correctness", "faithfulness", "relevance")
     }
-    aggregate.update({"question_count": len(records), "top_k": top_k})
+    aggregate.update({
+        "question_count": len(records),
+        "evaluated_count": len(per_question),
+        "top_k": top_k,
+    })
     return aggregate, per_question
 
 
@@ -191,8 +211,8 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=3, help="Number of chunks to retrieve per question (default: 3).")
     parser.add_argument("--llm-model", default=None, help="Use Ollama for answer generation and judging (for example, llama3.2:3b).")
     parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama server URL (default: http://localhost:11434).")
-    parser.add_argument("--retrieval-judge", choices=("ragas", "ragas_nonllm", "token_overlap"), default="ragas",
-                        help="Retrieval judge: RAGAS or free local token overlap (default: ragas).")
+    parser.add_argument("--retrieval-judge", choices=("ragas", "ragas_nonllm", "token_overlap"), default="ragas_nonllm",
+                        help="Retrieval judge: free RAGAS non-LLM metrics (default), full LLM-based RAGAS (needs OPENAI_API_KEY, costs money), or free local token overlap (not comparable to real RAGAS numbers).")
     
     args = parser.parse_args()
 
@@ -203,26 +223,30 @@ def main() -> None:
 
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO), format="%(levelname)s: %(message)s")
 
-    records = load_golden_set(args.golden_set)
-    print(f"Loaded {len(records)} golden-set question(s).")
-
     retriever = FAISSRetriever.load(args.database)
     if args.llm_model:
+        records = load_golden_set(args.golden_set)
+        print(f"Loaded {len(records)} golden-set question(s).")
         print(f"Generating and judging answers with local Ollama model: {args.llm_model}")
         aggregate_scores, per_question = evaluate_with_ollama(
             records, retriever, args.top_k, OllamaClient(args.llm_model, args.ollama_url)
         )
     elif args.retrieval_judge == "token_overlap":
+        records = load_golden_set(args.golden_set)
+        print(f"Loaded {len(records)} golden-set question(s).")
         print("Scoring retrieval with local token overlap (context_precision, context_recall)...")
         aggregate_scores, per_question = evaluate_with_token_overlap(records, retriever, args.top_k)
     elif args.retrieval_judge == "ragas_nonllm":
         records = load_golden_set_with_contexts(args.golden_set)
+        print(f"Loaded {len(records)} golden-set question(s) with reference contexts.")
         print("Scoring retrieval with RAGAS non-LLM metrics (free, no model needed)...")
         aggregate_scores, per_question = evaluate_with_ragas_nonllm(records, retriever, args.top_k)
     else:
         from ragas import evaluate
         from ragas.metrics import context_precision, context_recall
 
+        records = load_golden_set(args.golden_set)
+        print(f"Loaded {len(records)} golden-set question(s).")
         dataset = build_ragas_dataset(records, retriever, args.top_k)
         print("Scoring retrieval with RAGAS (context_precision, context_recall)...")
         result = evaluate(dataset, metrics=[context_precision, context_recall])
@@ -244,7 +268,7 @@ def main() -> None:
 
     print("\n=== Aggregate scores ===")
     for metric, score in aggregate_scores.items():
-        if metric not in {"question_count", "top_k"}:
+        if metric not in {"question_count", "top_k", "judge", "evaluated_count"}:
             print(f"{metric}: {score:.4f}")
     print(f"\nSaved full results to {output_path}")
 
