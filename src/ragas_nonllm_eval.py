@@ -2,7 +2,7 @@
 
 Uses ragas.metrics.NonLLMContextPrecisionWithReference and
 NonLLMContextRecall — both compare retrieved text against reference_contexts
-using a non-LLM string-distance measure (Levenshtein by default). No API key,
+using a non-LLM string-distance measure (Jaro-Winkler). No API key,
 no local model, no Ollama required.
 
 Each golden-set record must have:
@@ -19,22 +19,19 @@ from typing import Any
 
 from ragas import SingleTurnSample
 from ragas.metrics import NonLLMContextPrecisionWithReference, NonLLMContextRecall
-from ragas.metrics import NonLLMContextPrecisionWithReference
 from ragas.metrics._string import NonLLMStringSimilarity, DistanceMeasure
 
-# به‌جای Levenshtein پیش‌فرض:
-_precision_metric = NonLLMContextPrecisionWithReference(
-    distance_measure=NonLLMStringSimilarity(
-        distance_measure=DistanceMeasure.JARO_WINKLER  # به طول کمتر حساسه
-    )
-)
 
-from Retrieval import FAISSRetriever
+from retrieval import FAISSRetriever
 from vector_store import VectorStoreError
 
 logger = logging.getLogger(__name__)
 
-_precision_metric = NonLLMContextPrecisionWithReference()
+_precision_metric = NonLLMContextPrecisionWithReference(
+    distance_measure=NonLLMStringSimilarity(
+        distance_measure=DistanceMeasure.JARO_WINKLER 
+    )
+)
 _recall_metric = NonLLMContextRecall()
 
 
