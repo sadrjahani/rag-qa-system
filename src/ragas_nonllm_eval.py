@@ -19,6 +19,15 @@ from typing import Any
 
 from ragas import SingleTurnSample
 from ragas.metrics import NonLLMContextPrecisionWithReference, NonLLMContextRecall
+from ragas.metrics import NonLLMContextPrecisionWithReference
+from ragas.metrics._string import NonLLMStringSimilarity, DistanceMeasure
+
+# به‌جای Levenshtein پیش‌فرض:
+_precision_metric = NonLLMContextPrecisionWithReference(
+    distance_measure=NonLLMStringSimilarity(
+        distance_measure=DistanceMeasure.JARO_WINKLER  # به طول کمتر حساسه
+    )
+)
 
 from Retrieval import FAISSRetriever
 from vector_store import VectorStoreError
