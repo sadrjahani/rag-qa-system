@@ -40,6 +40,11 @@ def main() -> None:
 
     actual_dimension = int(embeddings.shape[1])
     if config.embedding_dimension is not None and config.embedding_dimension != actual_dimension:
+        logger.error(
+            "EMBEDDING_DIMENSION mismatch: .env says %d but model '%s' produces %d. "
+            "Update or remove EMBEDDING_DIMENSION in .env before rebuilding.",
+            config.embedding_dimension, args.model_name, actual_dimension,
+        )
         raise VectorStoreError(
             "EMBEDDING_DIMENSION does not match the selected model: "
             f"{config.embedding_dimension} != {actual_dimension}. Remove or correct it in .env."
