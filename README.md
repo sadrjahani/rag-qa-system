@@ -6,8 +6,9 @@ creates overlapping chunks, embeds them with SentenceTransformers, stores the
 vectors in a local FAISS index, and retrieves the most relevant passages for a
 question.
 
-The project currently implements **retrieval**, not LLM answer generation.
-Its output is the ranked source context that an answering model can use later.
+The project supports retrieval evaluation and optional local LLM answer
+evaluation. Ollama can generate grounded answers and judge them without an API
+key or hosted model charges.
 
 ## Pipeline
 
@@ -213,6 +214,45 @@ Before trusting answers, inspect the generated artifacts:
   passage appears in the top 3 or top 5 results.
 - If a result is poor, investigate in this order: PDF extraction, chunking,
   source metadata, embedding model, then retrieval settings.
+
+## Evaluate with a free local LLM
+
+The default evaluator measures retrieval with RAGAS:
+
+```powershell
+python src/evaluate.py data/eval/golden_set.jsonl data/vector_db/AI_Engineering `
+   -o data/eval/retrieval_results.json --top-k 3
+```
+
+For answer-level evaluation, install [Ollama](https://ollama.com/), start it,
+and download a local model. A small model such as `llama3.2:3b` is a practical
+starting point on a laptop:
+
+```powershell
+ollama pull llama3.2:3b
+python src/evaluate.py data/eval/golden_set.jsonl data/vector_db/AI_Engineering `
+   --llm-model llama3.2:3b -o data/eval/llm_results.json --top-k 3
+```
+
+For each golden-set question, the evaluator retrieves context, asks Ollama for
+an answer with `[Context N]` citations, then asks the same local model to
+return structured scores for:
+
+- `correctness`: agreement with the reference answer
+- `faithfulness`: whether material claims are supported by retrieved context
+- `relevance`: whether the answer addresses the question
+
+The output JSON contains aggregate scores and each generated answer. Use a
+separate judge model with `--ollama-url` only if you run another local Ollama
+server; the default URL is `http://localhost:11434`.
+
+### Completed retrieval iteration
+
+As a controlled experiment, `top_k` was changed from 3 to 5 while keeping the
+golden set, FAISS database, embedding model, and judge fixed. Context recall
+improved from `0.7305` to `0.8255`, while context precision changed from
+`0.0445` to `0.0427`. The full before/after comparison is recorded in
+[`data/eval/iteration_top_k_report.md`](data/eval/iteration_top_k_report.md).
 
 Common issues:
 
