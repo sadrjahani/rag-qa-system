@@ -109,13 +109,13 @@ to documents by position.
 4. Ask additional questions without rebuilding the database:
 
    ```powershell
-   python src/Retrieval.py "data\vector_db\AI Engineering" "How does chunk overlap help retrieval?" --top-k 5
+   python src/retrieval.py "data\vector_db\AI Engineering" "How does chunk overlap help retrieval?" --top-k 5
    ```
 
 5. Optionally save a retrieval result to JSON:
 
    ```powershell
-   python src/Retrieval.py "data\vector_db\AI Engineering" "What is RAG?" --top-k 3 --save "data\vector_db\AI Engineering\rag_results.json"
+   python src/retrieval.py "data\vector_db\AI Engineering" "What is RAG?" --top-k 3 --save "data\vector_db\AI Engineering\rag_results.json"
    ```
 
 ## Running individual stages
@@ -149,7 +149,7 @@ python src/embedding.py "data\chunks\AI Engineering_chunks.jsonl" -o "data\vecto
 ### 4. Retrieve relevant chunks
 
 ```powershell
-python src/Retrieval.py "data\vector_db\AI Engineering" "What is a vector database?" --top-k 3
+python src/retrieval.py "data\vector_db\AI Engineering" "What is a vector database?" --top-k 3
 ```
 
 ## Main commands
@@ -177,7 +177,7 @@ python src/run_pipeline.py "data\source\book.pdf" --cleaned-dir "other\cleaned" 
 | `src/embedding_model.py` | Shared lazy-loading SentenceTransformer wrapper for document and query embeddings. |
 | `src/vector_store.py` | FAISS vector-store persistence and JSONL validation. |
 | `src/embedding.py` | Builds a local FAISS database from chunk JSONL. |
-| `src/Retrieval.py` | Loads a saved database and retrieves ranked source chunks. |
+| `src/retrieval.py` | Loads a saved database and retrieves ranked source chunks. |
 | `src/run_pipeline.py` | Runs extraction, chunking, embedding, and optional retrieval in one command. |
 | `src/config.py` | Loads shared environment configuration. |
 
