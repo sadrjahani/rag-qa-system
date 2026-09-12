@@ -1,5 +1,5 @@
 """The embedding model wrapper, shared by embedding.py (building the vector
-database) and Retrieval.py (embedding queries at search time).
+database) and retrieval.py (embedding queries at search time).
 """
 
 import logging
@@ -23,7 +23,12 @@ class EmbeddingModel:
             self._model = SentenceTransformer(self.model_name)
         return self._model
 
-    def encode_batch(self, texts: list[str], batch_size: int = 32) -> np.ndarray:
+    def encode_batch(
+        self,
+        texts: list[str],
+        batch_size: int = 32,
+        show_progress: bool = False,
+    ) -> np.ndarray:
         if not texts:
             raise ValueError("Cannot embed an empty list of texts.")
         logger.info("Encoding %d chunk(s).", len(texts))
@@ -37,6 +42,6 @@ class EmbeddingModel:
             batch_size=batch_size,
             convert_to_numpy=True,
             normalize_embeddings=True,
-            show_progress_bar=len(texts) >= 100,
+            show_progress_bar = show_progress,
         )
-        return np.ascontiguousarray(embeddings, dtype=np.float32)
+        return np.array(embeddings, dtype=np.float32, copy=True)
