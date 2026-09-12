@@ -25,7 +25,7 @@ import chunking as chunking_stage
 from config import Config
 from embedding_model import EmbeddingModel
 from vector_store import FAISSVectorStore, VectorStoreError
-from Retrieval import FAISSRetriever, print_results, save_results_to_json
+from retrieval import FAISSRetriever, print_results, save_results_to_json
 
 
 def default_artifact_directories(pdf_path: Path) -> tuple[Path, Path, Path]:

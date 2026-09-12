@@ -33,7 +33,7 @@ from typing import Any
 
 from config import Config
 from ollama_client import OllamaClient, OllamaError
-from Retrieval import FAISSRetriever
+from retrieval import FAISSRetriever
 from vector_store import VectorStoreError
 from ragas_nonllm_eval import evaluate_with_ragas_nonllm, load_golden_set_with_contexts
 
