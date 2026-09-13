@@ -14,34 +14,37 @@ Usage:
 
 import argparse
 import json
+import logging
 from collections import Counter
 from pathlib import Path
 
-import pymupdf  # pymupdf
+import pymupdf
 
 
-def detect_body_font_size(path, sample_pages=5):
+logger = logging.getLogger(__name__)    
+
+def detect_body_font_size(path: Path, sample_pages: int = 5) -> float:
     """Guess the main body-text font size by finding the size with the most
     characters across a sample of pages. Footnotes/captions are almost
     always smaller than this, headings are almost always bigger.
     """
-    doc = pymupdf.open(path)
-    char_counts_by_size = Counter()
+    with pymupdf.open(path) as doc:
+        char_counts_by_size = Counter()
 
-    for i, page in enumerate(doc):
-        if i >= sample_pages:
-            break
-        for block in page.get_text("dict")["blocks"]:
-            if block.get("type") != 0:  # only text blocks
-                continue
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    text = span.get("text", "")
-                    size = span.get("size")
-                    if size is not None and text.strip():
-                        char_counts_by_size[round(size, 1)] += len(text)
+        for i, page in enumerate(doc):
+            if i >= sample_pages:
+                break
+            for block in page.get_text("dict")["blocks"]:
+                if block.get("type") != 0:  # only text blocks
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        text = span.get("text", "")
+                        size = span.get("size")
+                        if size is not None and text.strip():
+                            char_counts_by_size[round(size, 1)] += len(text)
 
-    doc.close()
+
 
     if not char_counts_by_size:
         return 9.0  # fallback if nothing was found
@@ -50,13 +53,14 @@ def detect_body_font_size(path, sample_pages=5):
 
 
 def extract_text_with_filters(
-    path,
+    path: Path,
     min_font_size=None,
     y_margin_top=0.15,
     y_margin_bottom=0.85,
     heading_ratio=1.15,
     max_heading_words=12,
-):
+) -> tuple[str, dict]:
+
     """Extract text from a PDF with font-size and position filters, and
     collect heading candidates + page-level metadata along the way.
 
@@ -76,62 +80,62 @@ def extract_text_with_filters(
 
     if min_font_size is None:
         min_font_size = round(body_font_size - 0.5, 1)
-        print(f"Auto-detected min_font_size: {min_font_size}")
+        logger.info("Auto-detected min_font_size: %s", min_font_size)
 
-    doc = pymupdf.open(path)
-    pages_text = []
-    headings = []
 
-    for page_index, page in enumerate(doc):
-        height = page.rect.height
-        blocks = page.get_text("dict")["blocks"]
-        page_lines = []
+    with pymupdf.open(path) as doc:
+        pages_text = []
+        headings = []
 
-        for block in blocks:
-            if block.get("type") != 0:  # only text blocks
-                continue
+        for page_index, page in enumerate(doc):
+            height = page.rect.height
+            blocks = page.get_text("dict")["blocks"]
+            page_lines = []
 
-            for line in block.get("lines", []):
-                y = line["bbox"][1]  # top position
-
-                # filter by position (remove header/footer)
-                if not (y_margin_top * height < y < y_margin_bottom * height):
+            for block in blocks:
+                if block.get("type") != 0:  # only text blocks
                     continue
 
-                spans = line.get("spans", [])
-                if not spans:
-                    continue
+                for line in block.get("lines", []):
+                    y = line["bbox"][1]  # top position
 
-                max_span_size = max(
-                    (s["size"] for s in spans if s.get("size") is not None),
-                    default=0,
-                )
-                line_text_raw = "".join(s.get("text", "") for s in spans).strip()
+                    # filter by position (remove header/footer)
+                    if not (y_margin_top * height < y < y_margin_bottom * height):
+                        continue
 
-                # heading candidate: noticeably bigger font than body, short line
-                if (
-                    line_text_raw
-                    and max_span_size >= body_font_size * heading_ratio
-                    and len(line_text_raw.split()) <= max_heading_words
-                ):
-                    headings.append({
-                        "text": line_text_raw,
-                        "page": page_index + 1,
-                        "font_size": round(max_span_size, 1),
-                    })
+                    spans = line.get("spans", [])
+                    if not spans:
+                        continue
 
-                # body text: font-size filter (removes footnotes), keep line breaks
-                line_spans = [
-                    s["text"] for s in spans
-                    if s.get("size") is not None and s["size"] >= min_font_size
-                ]
-                if line_spans:
-                    page_lines.append(" ".join(line_spans))
+                    max_span_size = max(
+                        (s["size"] for s in spans if s.get("size") is not None),
+                        default=0,
+                    )
+                    line_text_raw = "".join(s.get("text", "") for s in spans).strip()
 
-        pages_text.append("\n".join(page_lines))
+                    # heading candidate: noticeably bigger font than body, short line
+                    if (
+                        line_text_raw
+                        and max_span_size >= body_font_size * heading_ratio
+                        and len(line_text_raw.split()) <= max_heading_words
+                    ):
+                        headings.append({
+                            "text": line_text_raw,
+                            "page": page_index + 1,
+                            "font_size": round(max_span_size, 1),
+                        })
 
-    num_pages = doc.page_count
-    doc.close()
+                    # body text: font-size filter (removes footnotes), keep line breaks
+                    line_spans = [
+                        s["text"] for s in spans
+                        if s.get("size") is not None and s["size"] >= min_font_size
+                    ]
+                    if line_spans:
+                        page_lines.append(" ".join(line_spans))
+
+            pages_text.append("\n".join(page_lines))
+
+        num_pages = doc.page_count
 
     text = "\n\n".join(pages_text)  # blank line between pages
 
@@ -149,45 +153,46 @@ def extract_text_with_filters(
     return text, metadata
 
 
-def save_text_to_file(text, filename):
+def save_text_to_file(text: str, filename: Path) -> None:
+    """Write extracted text to a UTF-8 .txt file, creating parent dirs as needed."""
     Path(filename).parent.mkdir(parents=True, exist_ok=True)
     with open(filename, "w", encoding="utf-8") as file:
         file.write(text)
 
 
-def save_metadata_to_file(metadata, filename):
+def save_metadata_to_file(metadata: dict, filename: Path) -> None:
+    """Write extracted metadata to a UTF-8 .json file, creating parent dirs as needed."""
     Path(filename).parent.mkdir(parents=True, exist_ok=True)
     with open(filename, "w", encoding="utf-8") as file:
         json.dump(metadata, file, ensure_ascii=False, indent=2)
 
 
-def inspect_font_sizes(path, num_pages=1):
+def inspect_font_sizes(path: Path, num_pages: int = 1) -> None:
     """Print font size/font/y-position for each span, useful for manually
     picking a min_font_size or heading_ratio if auto-detection needs a
     sanity check.
     """
-    doc = pymupdf.open(path)
+    with pymupdf.open(path) as doc:
 
-    for i, page in enumerate(doc):
-        if i >= num_pages:
-            break
+        for i, page in enumerate(doc):
+            if i >= num_pages:
+                break
 
-        print(f"\n=== Page {i + 1} ===")
-        for block in page.get_text("dict")["blocks"]:
-            if block.get("type") != 0:
-                continue
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    text = span["text"][:50]
-                    size = span.get("size")
-                    font = span.get("font")
-                    y = line["bbox"][1]
-                    print(f"Size: {size:5.2f}, Font: {font}, Y: {y:6.2f}, Text: {text}")
-
-    doc.close()
+            print(f"\n=== Page {i + 1} ===")
+            for block in page.get_text("dict")["blocks"]:
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        text = span["text"][:50]
+                        size = span.get("size")
+                        font = span.get("font")
+                        y = line["bbox"][1]
+                        print(f"Size: {size:5.2f}, Font: {font}, Y: {y:6.2f}, Text: {text}")
 
 
-def main():
+
+def main()-> None:
     parser = argparse.ArgumentParser(description="Extract cleaned body text (+ heading/page metadata) from a PDF.")
     parser.add_argument("input", type=Path, help="Path to the input PDF file.")
     parser.add_argument(
@@ -224,6 +229,11 @@ def main():
     )
     args = parser.parse_args()
 
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+    if not args.input.is_file():
+        parser.error(f"Input file does not exist: {args.input}")
+
     if args.inspect:
         inspect_font_sizes(args.input)
         return
@@ -239,13 +249,18 @@ def main():
         max_heading_words=args.max_heading_words,
     )
     save_text_to_file(text, output_path)
-    print(f"Done. Saved text to {output_path}")
+    logger.info("Saved text to %s", output_path)
+
 
     if not args.no_metadata:
         meta_path = output_path.with_suffix(".meta.json")
         save_metadata_to_file(metadata, meta_path)
-        print(f"Saved metadata ({len(metadata['headings'])} heading candidates) to {meta_path}")
-
+        logger.info(
+            "Saved metadata (%d heading candidates) to %s",
+            len(metadata["headings"]),
+            meta_path,
+        )
+    logger.info("Conversion complete. Text saved to %s.", output_path)
 
 if __name__ == "__main__":
     main()
