@@ -1,15 +1,75 @@
 # Local PDF RAG Pipeline
 
-A small, local Retrieval-Augmented Generation (RAG) retrieval pipeline for
-asking questions about one or more PDF books. It extracts readable PDF text,
-creates overlapping chunks, embeds them with SentenceTransformers, stores the
-vectors in a local FAISS index, and retrieves the most relevant passages for a
-question.
+A local Retrieval-Augmented Generation (RAG) foundation for asking questions over PDF documents.
 
-The project supports retrieval evaluation and optional local LLM answer
-evaluation. Ollama can generate grounded answers and judge them without an API
-key or hosted model charges.
+The project implements the retrieval side of a RAG system end-to-end:
 
+**PDF ingestion → text cleaning → structure-aware chunking → embeddings → FAISS vector search → ranked context retrieval → evaluation**
+
+It is intentionally designed as a small, transparent system rather than hiding the core retrieval logic behind a high-level framework. The goal is to make each stage observable, testable, and easy to experiment with before adding more advanced RAG components.
+
+> **Current scope:** The repository currently focuses on document ingestion, retrieval, and retrieval evaluation. Grounded answer generation with a local LLM is supported as an optional evaluation path and is being extended as the next stage of the project.
+
+---
+## Architecture
+
+```text
+                         Offline / Indexing
+┌────────────────┐
+│   PDF files    │
+└───────┬────────┘
+        ↓
+┌────────────────────┐
+│ PDF text extraction│
+│ + cleaning         │
+└────────┬───────────┘
+         ↓
+┌────────────────────┐
+│ Structure-aware    │
+│ chunking           │
+└────────┬───────────┘
+         ↓
+┌────────────────────┐
+│ SentenceTransformer│
+│ embeddings         │
+└────────┬───────────┘
+         ↓
+┌────────────────────┐
+│ FAISS vector index │
+└────────┬───────────┘
+         ↓
+      Persisted
+     vector database
+
+
+                         Online / Query
+┌──────────────┐
+│ User question│
+└──────┬───────┘
+       ↓
+┌────────────────────┐
+│ Query embedding    │
+└────────┬───────────┘
+         ↓
+┌────────────────────┐
+│ FAISS similarity   │
+│ search             │
+└────────┬───────────┘
+         ↓
+┌────────────────────┐
+│ Top-k relevant     │
+│ chunks              │
+└────────┬───────────┘
+         ↓
+   Retrieved context
+         ↓
+┌────────────────────┐
+│ Optional grounded  │
+│ LLM generation     │
+└────────────────────┘
+```
+
+---
 ## Pipeline
 
 ```text
