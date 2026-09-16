@@ -80,16 +80,44 @@ PDF
   -> ranked relevant source chunks
 ```
 
+---
+
 ## Features
 
-- Local processing: no hosted vector database is required.
-- PDF extraction that filters likely headers, footers, and small-font footnotes.
-- Automatic heading candidates and section-aware chunking.
-- Token-based chunks with paragraph-level overlap.
-- SentenceTransformer embeddings using `all-MiniLM-L6-v2` by default.
-- Exact FAISS search using normalized inner product (cosine-similarity ranking).
-- Database validation before retrieval: index, metadata, and documents must agree.
-- Optional JSON export of retrieved results.
+- **Local document processing** — no hosted vector database is required.
+- **PDF extraction and cleaning** using PyMuPDF.
+- Detection of likely headings and page information.
+- Filtering of likely headers, footers, and small-font footnotes.
+- **Structure-aware chunking** based on document sections and paragraphs.
+- Token-based chunk sizing with paragraph-level overlap.
+- **SentenceTransformer embeddings** using `all-MiniLM-L6-v2` by default.
+- **FAISS exact similarity search** using normalized inner products.
+- Cosine-similarity ranking through L2-normalized embeddings.
+- Persistent vector database with index, documents, and metadata.
+- Validation to prevent mismatches between vectors and their source documents.
+- Configurable `top_k`, chunk size, overlap, embedding model, and embedding dimension.
+- Retrieval evaluation with **RAGAS**.
+- Optional local LLM answer evaluation using **Ollama**.
+- JSON export of retrieved results and evaluation results.
+- Controlled retrieval experiments for comparing configuration changes.
+
+---
+# Tech Stack
+
+| Component | Technology |
+|---|---|
+| Language | Python 3.10+ |
+| PDF processing | PyMuPDF |
+| Embeddings | SentenceTransformers |
+| Default embedding model | `all-MiniLM-L6-v2` |
+| Vector search | FAISS |
+| Similarity metric | Cosine similarity |
+| Evaluation | RAGAS |
+| Optional local LLM | Ollama |
+| Configuration | `.env` |
+| Storage format | JSONL + FAISS |
+
+---
 
 ## Requirements
 
@@ -105,6 +133,8 @@ python -m pip install -r requirements.txt
 
 The first embedding run downloads the selected SentenceTransformer model.
 
+---
+
 ## Configuration
 
 Create a `.env` file in the repository root:
@@ -115,43 +145,82 @@ EMBEDDING_DIMENSION=384
 LOG_LEVEL=INFO
 ```
 
-`EMBEDDING_DIMENSION` is a safety contract. It must match the selected model.
-For `all-MiniLM-L6-v2`, the dimension is `384`. The build scripts stop if the
-model produces a different dimension, preventing incompatible vector databases.
+### Why is `EMBEDDING_DIMENSION` configured explicitly?
 
-## Data storage structure
+The embedding dimension is part of the contract between the embedding model and FAISS.
+
+For example:
+
+```text
+all-MiniLM-L6-v2
+        ↓
+384-dimensional vector
+        ↓
+FAISS index dimension = 384
+```
+
+The pipeline validates the actual output dimension of the model against the configured value.
+
+If they do not match, the build stops rather than creating an incompatible vector database.
+
+This prevents a class of errors where an index is created for one embedding space but vectors from another model are inserted into it.
+
+---
+
+# Data and Artifact Structure
 
 Keep source PDFs separate from generated artifacts:
 
 ```text
 data/
-├── source/                         # Original PDFs only
+├── source/
 │   └── AI Engineering.pdf
-├── cleaned/                        # Generated cleaned text and metadata
+│
+├── cleaned/
 │   ├── AI Engineering.txt
 │   └── AI Engineering.meta.json
-├── chunks/                         # Generated chunk records
+│
+├── chunks/
 │   └── AI Engineering_chunks.jsonl
-└── vector_db/                      # Generated searchable databases
-    └── AI Engineering/
-        ├── index.faiss             # FAISS vector index
-        ├── documents.jsonl         # Chunk text and metadata in vector-ID order
-        ├── metadata.json           # Model, dimension, metric, chunk count
-        └── query_results.json      # Optional result export
+│
+├── vector_db/
+│   └── AI Engineering/
+│       ├── index.faiss
+│       ├── documents.jsonl
+│       ├── metadata.json
+│       └── query_results.json
+│
+└── eval/
+    ├── golden_set.jsonl
+    ├── retrieval_results.json
+    ├── llm_results.json
+    └── iteration_top_k_report.md
 ```
 
-`data/` is ignored by Git so books, generated vectors, and local experiment
-outputs are not committed accidentally.
 
-This separation supports reproducibility and data lineage:
+`data/` is ignored by Git so that source books, generated vectors, and local experiment outputs are not accidentally committed.
+
+The pipeline maintains a clear data lineage:
 
 ```text
-source PDF -> cleaned text -> chunks -> vector database
+source PDF
+    ↓
+cleaned text
+    ↓
+chunk records
+    ↓
+embeddings
+    ↓
+FAISS vector database
+    ↓
+retrieved contexts
 ```
 
-If chunks change, rebuild the vector database. Do not edit or reorder
-`documents.jsonl` independently of `index.faiss`, because FAISS result IDs map
-to documents by position.
+If chunks change, the vector database should be rebuilt.
+
+Do not manually reorder or edit `documents.jsonl` independently of `index.faiss`, because FAISS result IDs map to documents by position.
+
+---
 
 ## Quick start
 
