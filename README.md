@@ -222,93 +222,131 @@ Do not manually reorder or edit `documents.jsonl` independently of `index.faiss`
 
 ---
 
-## Quick start
+# Quick Start
 
-1. Put a PDF in `data/source/`.
+## 1. Add a PDF
 
-2. Build the database and immediately ask a question:
+Place a PDF in:
 
-   ```powershell
-   python src/run_pipeline.py "data\source\AI Engineering.pdf" --query "What is retrieval-augmented generation?" --top-k 3
-   ```
+```text
+data/source/
+```
 
-3. The pipeline writes outputs to `data/cleaned/`, `data/chunks/`, and
-   `data/vector_db/AI Engineering/`.
+For example:
 
-4. Ask additional questions without rebuilding the database:
+```text
+data/source/AI Engineering.pdf
+```
 
-   ```powershell
-   python src/retrieval.py "data\vector_db\AI Engineering" "How does chunk overlap help retrieval?" --top-k 5
-   ```
+## 2. Build the database and retrieve immediately
 
-5. Optionally save a retrieval result to JSON:
+```powershell
+python src/run_pipeline.py "data\source\AI Engineering.pdf" --query "What is retrieval-augmented generation?" --top-k 3
+```
 
-   ```powershell
-   python src/retrieval.py "data\vector_db\AI Engineering" "What is RAG?" --top-k 3 --save "data\vector_db\AI Engineering\rag_results.json"
-   ```
+The pipeline creates:
 
-## Running individual stages
+```text
+data/cleaned/
+data/chunks/
+data/vector_db/AI Engineering/
+```
+
+## 3. Ask additional questions
+
+Once the vector database exists, it can be queried without rebuilding it:
+
+```powershell
+python src/Retrieval.py "data\vector_db\AI Engineering" "How does chunk overlap help retrieval?" --top-k 5
+```
+
+## 4. Save retrieval results
+
+```powershell
+python src/Retrieval.py "data\vector_db\AI Engineering" "What is RAG?" --top-k 3 --save "data\vector_db\AI Engineering\rag_results.json"
+```
+
+---
+
+# Running Individual Stages
 
 The complete pipeline is recommended, but each stage can be run separately.
 
-### 1. Extract cleaned text
+#Extract cleaned text
 
 ```powershell
 python src/convert_pdf_to_text.py "data\source\AI Engineering.pdf" -o "data\cleaned\AI Engineering.txt"
 ```
 
-This also creates `data/cleaned/AI Engineering.meta.json`, which contains
-PDF settings, page count, and detected heading candidates.
+This also creates:
 
-### 2. Create chunks
+```text
+data/cleaned/AI Engineering.meta.json
+```
+
+### Create chunks
 
 ```powershell
 python src/chunking.py "data\cleaned\AI Engineering.txt" -o "data\chunks\AI Engineering_chunks.jsonl" --chunk-size 400 --overlap 60
 ```
 
-The chunker automatically looks for the matching `.meta.json` file unless
-metadata lookup is disabled.
-
-### 3. Build the vector database
+### Build the vector database
 
 ```powershell
 python src/embedding.py "data\chunks\AI Engineering_chunks.jsonl" -o "data\vector_db\AI Engineering"
 ```
 
-### 4. Retrieve relevant chunks
+### Retrieve
 
 ```powershell
-python src/retrieval.py "data\vector_db\AI Engineering" "What is a vector database?" --top-k 3
+python src/Retrieval.py "data\vector_db\AI Engineering" "What is a vector database?" --top-k 3
 ```
 
-## Main commands
+---
+
+# Main Commands
+
+### Full pipeline
 
 ```powershell
-# Full pipeline: PDF -> text -> chunks -> vectors
 python src/run_pipeline.py "data\source\book.pdf"
+```
 
-# Full pipeline with immediate retrieval
+### Full pipeline + retrieval
+
+```powershell
 python src/run_pipeline.py "data\source\book.pdf" --query "Your question" --top-k 3
+```
 
-# Tune chunking
+### Experiment with chunking
+
+```powershell
 python src/run_pipeline.py "data\source\book.pdf" --chunk-size 400 --overlap 60
+```
 
-# Override output locations when needed
+### Override output locations
+
+```powershell
 python src/run_pipeline.py "data\source\book.pdf" --cleaned-dir "other\cleaned" --chunks-dir "other\chunks" --output "other\vectors\book"
 ```
 
-## Project modules
+---
+## Project Modules
 
 | File | Responsibility |
-| --- | --- |
-| `src/convert_pdf_to_text.py` | Extracts PDF body text, filters likely headers/footers/footnotes, and records heading/page metadata. |
-| `src/chunking.py` | Splits cleaned text into overlapping JSONL chunk records. |
-| `src/embedding_model.py` | Shared lazy-loading SentenceTransformer wrapper for document and query embeddings. |
-| `src/vector_store.py` | FAISS vector-store persistence and JSONL validation. |
-| `src/embedding.py` | Builds a local FAISS database from chunk JSONL. |
-| `src/retrieval.py` | Loads a saved database and retrieves ranked source chunks. |
-| `src/run_pipeline.py` | Runs extraction, chunking, embedding, and optional retrieval in one command. |
-| `src/config.py` | Loads shared environment configuration. |
+|---|---|
+| `convert_pdf_to_text.py` | PDF extraction, cleaning, heading/page metadata |
+| `chunking.py` | Structure-aware chunking and JSONL output |
+| `embedding_model.py` | Shared lazy-loading SentenceTransformer wrapper |
+| `vector_store.py` | FAISS vector-store creation, persistence, and validation |
+| `embedding.py` | Builds the vector database from chunks |
+| `Retrieval.py` | Loads the database and retrieves ranked chunks |
+| `run_pipeline.py` | Orchestrates the complete ingestion/indexing pipeline |
+| `config.py` | Shared environment configuration |
+| `ragas_nonllm_eval.py` | Free retrieval evaluation using RAGAS non-LLM metrics |
+| `evaluate.py` | Central evaluation entry point |
+
+---
 
 ## How retrieval works
 
