@@ -16,7 +16,8 @@ class Config:
     embedding_model_name: str
     embedding_dimension: int | None
     log_level: str
-
+    llm_model: str
+     
     @classmethod
     def from_env(cls) -> "Config":
         load_dotenv(find_dotenv())
@@ -25,4 +26,5 @@ class Config:
             embedding_model_name=os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2"),
             embedding_dimension=int(raw_dimension) if raw_dimension else None,
             log_level=os.getenv("LOG_LEVEL", "INFO"),
+            llm_model=os.getenv("LLM_MODEL", "qwen3:14b"),
         )
