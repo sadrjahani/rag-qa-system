@@ -3,6 +3,8 @@
 RAG answer generation using retrieved context and a local LLM.
  
  python src/generation.py data/vector_db/AI Engineer "What is RAG?"
+ python src\generation.py --top-k 3 --model qwen3:14b "data\vector_db\AI Engineering" "What is RAG?" 
+            
 
 """
 
@@ -14,8 +16,8 @@ from pathlib import Path
 
 from dataclasses import dataclass
 
-
-from ollama_client import OllamaClient
+import config
+from ollama_client import OllamaClient, OllamaError
 from retrieval import FAISSRetriever, RetrievedChunk
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,9 @@ class RAGAnswer:
     sources: list[RetrievedChunk]
 
 class RAGGenerator:
+
+    # logger.info("Retrieving top-%d chunks for question: %s", top_k, question[:60])
+
     def __init__(
         self,
         retriever: FAISSRetriever,
@@ -80,6 +85,8 @@ class RAGGenerator:
             question,
             top_k=top_k,
         )
+        
+        logger.info("Retrieved %d chunk(s) for question: %s", len(retrieved_chunks), question[:60])
 
         if not retrieved_chunks:
             raise ValueError("No relevant context was retrieved.")
@@ -88,7 +95,14 @@ class RAGGenerator:
             retrieved_chunks,
         )
 
-        answer = self.llm.generate(prompt)
+        try:
+            answer = self.llm.generate(prompt)
+        except OllamaError as exc:
+            logger.error("LLM generation failed: %s", exc)
+            raise
+
+
+        logger.info("Generated answer with %d source(s).", len(retrieved_chunks))
 
         return RAGAnswer(
             question=question,
@@ -98,6 +112,7 @@ class RAGGenerator:
 
 def main() -> None:
     
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     parser = argparse.ArgumentParser(
         description="Generate an answer using retrieved context and a local LLM."
@@ -125,16 +140,19 @@ def main() -> None:
     parser.add_argument(
         "--model",
         type=str,
-        default="qwen3:14b",
-        help="Ollama model name (default: qwen3:14b).",
+        default=None,
+        help="Ollama model name (default: LLM_MODEL or qwen3:14b).",
     )
+
+    
 
     args = parser.parse_args()
 
     retriever = FAISSRetriever.load(args.database)
 
     llm = OllamaClient(
-        model=args.model,
+        model=args.model or config.Config.from_env().llm_model,
+        timeout=300,
     )
 
     generator = RAGGenerator(
@@ -158,7 +176,7 @@ def main() -> None:
             f"page={source.page}, "
             f"section={source.section}"
         )
-        print(source.text)
+        print(source.text[:200] + "..." if len(source.text) > 200 else source.text)
 
 
 if __name__ == "__main__":
