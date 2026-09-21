@@ -93,7 +93,10 @@ def run_pipeline(
 
     documents = [asdict(chunk) for chunk in chunks]
     embedder = EmbeddingModel(resolved_model_name)
-    embeddings = embedder.encode_batch([doc["text"] for doc in documents], batch_size)
+    embeddings = embedder.encode_batch(
+        [doc["text"] for doc in documents], 
+         batch_size=batch_size,
+        )
 
     actual_dimension = int(embeddings.shape[1])
     if (
