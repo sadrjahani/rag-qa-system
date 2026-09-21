@@ -17,6 +17,8 @@ class Config:
     embedding_dimension: int | None
     log_level: str
     llm_model: str
+    generation_model: str
+    generation_provider: str
      
     @classmethod
     def from_env(cls) -> "Config":
@@ -27,4 +29,6 @@ class Config:
             embedding_dimension=int(raw_dimension) if raw_dimension else None,
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             llm_model=os.getenv("LLM_MODEL", "qwen3:14b"),
+            generation_model=os.getenv("GENERATION_MODEL", "phi4-mini"),
+            generation_provider=os.getenv("GENERATION_PROVIDER", "ollama"),
         )
