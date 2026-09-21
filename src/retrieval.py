@@ -7,7 +7,7 @@ The database must be created first with ``embedding.py`` and contain:
     <database_dir>/metadata.json
 
 Example:
-    python src/Retrieval.py data/chapter_6_vectors "What is RAG?" --top-k 3
+    python src/retrieval.py data/chapter_6_vectors "What is RAG?" --top-k 3
 """
 
 import argparse
