@@ -183,8 +183,8 @@ def chunk_document(
     heading_pattern: Optional[str] = None,
     headings: Optional[List[dict]] = None,
 ) -> List[Chunk]:
-    """Layer 1 (structure) + layer 2 (recursive/token chunking).
-
+    """
+    Structure-aware paragraph-based chunking with token limits and overlap.
     Structure source priority: explicit heading_pattern regex first (if
     given), then metadata headings (if given), then no split (whole
     document as one section).
