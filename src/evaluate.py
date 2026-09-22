@@ -24,22 +24,24 @@ Example:
 
 from __future__ import annotations
 
-import argparse
-import json
-import logging
-import re
+# stdlib
+import argparse, json, logging, re
 from pathlib import Path
 from typing import Any
+from datasets import Dataset
 
+
+# local
 from config import Config
 from ollama_client import OllamaClient, OllamaError
 from retrieval import FAISSRetriever
 from vector_store import VectorStoreError
 from ragas_nonllm_eval import evaluate_with_ragas_nonllm, load_golden_set_with_contexts
 
+from ragas import evaluate
+from ragas.metrics import context_precision, context_recall
+
 logger = logging.getLogger(__name__)
-
-
 
 
 
@@ -71,7 +73,6 @@ def load_golden_set(path: Path) -> list[dict[str, Any]]:
 
 def build_ragas_dataset(records: list[dict[str, Any]], retriever: FAISSRetriever, top_k: int) -> Dataset:
     """Run retrieval for every question and assemble the RAGAS input dataset."""
-    from datasets import Dataset
 
     questions, contexts, ground_truths = [], [], []
 
@@ -203,7 +204,11 @@ def evaluate_with_ollama(records: list[dict[str, Any]], retriever: FAISSRetrieve
 
 
 def main() -> None:
+    
     config = Config.from_env()
+
+    logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO), format="%(levelname)s: %(message)s")
+    
     parser = argparse.ArgumentParser(description="Evaluate RAG retrieval, or generated answers with local Ollama.")
     parser.add_argument("golden_set", type=Path, help="Path to the golden set .jsonl file.")
     parser.add_argument("database", type=Path, help="Path to the vector database directory (from embedding.py).")
@@ -216,13 +221,14 @@ def main() -> None:
     
     args = parser.parse_args()
 
+    if not args.database.is_dir():
+        parser.error(f"Database directory does not exist: {args.database}")
     if not args.golden_set.is_file():
         parser.error(f"Golden set file does not exist: {args.golden_set}")
     if args.top_k <= 0:
         parser.error("--top-k must be positive")
 
-    logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO), format="%(levelname)s: %(message)s")
-
+    
     retriever = FAISSRetriever.load(args.database)
     if args.llm_model:
         records = load_golden_set(args.golden_set)
@@ -242,9 +248,6 @@ def main() -> None:
         print("Scoring retrieval with RAGAS non-LLM metrics (free, no model needed)...")
         aggregate_scores, per_question = evaluate_with_ragas_nonllm(records, retriever, args.top_k)
     else:
-        from ragas import evaluate
-        from ragas.metrics import context_precision, context_recall
-
         records = load_golden_set(args.golden_set)
         print(f"Loaded {len(records)} golden-set question(s).")
         dataset = build_ragas_dataset(records, retriever, args.top_k)
