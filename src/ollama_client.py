@@ -12,7 +12,9 @@ class OllamaError(RuntimeError):
 class OllamaClient:
     """Call Ollama's local ``/api/generate`` endpoint without extra packages."""
 
-    def __init__(self, model: str, base_url: str = "http://localhost:11434", timeout: int = 120) -> None:
+    def __init__(self, model: str, base_url: str = "http://localhost:11434",
+     timeout: int = 300,
+     ) -> None:
         if not model.strip():
             raise ValueError("Ollama model must not be empty.")
         self.model = model
