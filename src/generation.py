@@ -2,8 +2,7 @@
 """
 RAG answer generation using retrieved context and a local LLM.
  
- python src/generation.py data/vector_db/AI Engineer "What is RAG?"
- python src\generation.py --top-k 3 --model qwen3:14b "data\vector_db\AI Engineering" "What is RAG?" 
+ python src/generation.py --top-k 3 --model qwen3:14b "data/vector_db/AI Engineering" "What is RAG?" 
             
 
 """
@@ -16,11 +15,13 @@ from pathlib import Path
 
 from dataclasses import dataclass
 
-import config
+from config import Config
 from ollama_client import OllamaClient, OllamaError
 from retrieval import FAISSRetriever, RetrievedChunk
+from llm_providers import get_provider, LLMProvider
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class RAGAnswer:
@@ -35,7 +36,7 @@ class RAGGenerator:
     def __init__(
         self,
         retriever: FAISSRetriever,
-        llm: OllamaClient,
+        llm: LLMProvider,
     ) -> None:
         self.retriever = retriever
         self.llm = llm
@@ -112,7 +113,12 @@ class RAGGenerator:
 
 def main() -> None:
     
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    app_config: Config = Config.from_env()
+
+    logging.basicConfig(
+        level=getattr(logging, app_config.log_level.upper(), logging.INFO),
+        format="%(levelname)s: %(message)s",
+    )
 
     parser = argparse.ArgumentParser(
         description="Generate an answer using retrieved context and a local LLM."
@@ -138,22 +144,23 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--model",
-        type=str,
-        default=None,
-        help="Ollama model name (default: LLM_MODEL or qwen3:14b).",
+        "--provider",
+        choices=("ollama", "groq"),
+        default=app_config.generation_provider,
+        help="LLM provider (default: from .env)",
     )
 
-    
+    parser.add_argument(
+        "--model",
+        default=app_config.generation_model,
+        help="Model name (default: from .env)",
+    )
 
     args = parser.parse_args()
 
     retriever = FAISSRetriever.load(args.database)
 
-    llm = OllamaClient(
-        model=args.model or config.Config.from_env().llm_model,
-        timeout=300,
-    )
+    llm = get_provider(args.provider, args.model)
 
     generator = RAGGenerator(
         retriever=retriever,
