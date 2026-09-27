@@ -8,12 +8,12 @@ RAG answer generation using retrieved context and a local LLM.
 """
 
 
-
-import logging
 import argparse
+import json
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 
-from dataclasses import dataclass
 
 from config import Config
 from ollama_client import OllamaClient, OllamaError
@@ -156,6 +156,13 @@ def main() -> None:
         help="Model name (default: from .env)",
     )
 
+    parser.add_argument(
+    "--output",
+    type=Path,
+    default=None,
+    help="Optional path to save the generated result as JSON.",
+    )
+
     args = parser.parse_args()
 
     retriever = FAISSRetriever.load(args.database)
@@ -171,6 +178,31 @@ def main() -> None:
         question=args.question,
         top_k=args.top_k,
     )
+
+    if args.output:
+        output_data = {
+            "provider": args.provider,
+            "model": args.model,
+            "question": result.question,
+            "answer": result.answer,
+            "sources": [
+                {
+                    "score": source.score,
+                    "page": source.page,
+                    "section": source.section,
+                    "chunk_id": source.chunk_id,
+                    "text": source.text,
+                }
+                for source in result.sources
+            ],
+        }
+
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+
+        with args.output.open("w", encoding="utf-8") as f:
+            json.dump(output_data, f, ensure_ascii=False, indent=2)
+
+        logger.info("Result saved to: %s", args.output)
 
     print("\n=== Answer ===")
     print(result.answer)
