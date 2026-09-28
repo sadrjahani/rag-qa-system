@@ -1,12 +1,10 @@
+"""
+RAG answer generation using retrieved context and a configurable LLM provider.
+
+Example:
+python src/generation.py --top-k 3 --model phi4-mini "data/vector_db/AI Engineering" "What is RAG?"
 
 """
-RAG answer generation using retrieved context and a local LLM.
- 
- python src/generation.py --top-k 3 --model qwen3:14b "data/vector_db/AI Engineering" "What is RAG?" 
-            
-
-"""
-
 
 import argparse
 import json
@@ -16,7 +14,6 @@ from pathlib import Path
 
 
 from config import Config
-from ollama_client import OllamaClient, OllamaError
 from retrieval import FAISSRetriever, RetrievedChunk
 from llm_providers import get_provider, LLMProvider
 
@@ -98,7 +95,7 @@ class RAGGenerator:
 
         try:
             answer = self.llm.generate(prompt)
-        except OllamaError as exc:
+        except Exception as exc:
             logger.error("LLM generation failed: %s", exc)
             raise
 
@@ -157,11 +154,12 @@ def main() -> None:
     )
 
     parser.add_argument(
-    "--output",
-    type=Path,
-    default=None,
-    help="Optional path to save the generated result as JSON.",
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to save the generated result as JSON.",
     )
+
 
     args = parser.parse_args()
 
