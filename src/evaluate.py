@@ -56,10 +56,7 @@ from typing import Any
 from config import Config
 from generation import RAGGenerator
 from llm_providers import get_provider
-from ragas_nonllm_eval import (
-    evaluate_with_ragas_nonllm,
-    load_golden_set_with_contexts,
-)
+from ragas_nonllm_eval import evaluate_with_ragas_nonllm, load_golden_set_with_contexts
 from retrieval import FAISSRetriever
 from vector_store import VectorStoreError
 
