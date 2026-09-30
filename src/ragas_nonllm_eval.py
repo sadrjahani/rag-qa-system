@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ragas import SingleTurnSample
+from ragas.dataset_schema import SingleTurnSample
 from ragas.metrics import NonLLMContextPrecisionWithReference, NonLLMContextRecall
 from ragas.metrics._string import NonLLMStringSimilarity, DistanceMeasure
 
