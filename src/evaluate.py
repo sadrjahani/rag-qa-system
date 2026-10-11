@@ -13,36 +13,25 @@ Retrieval evaluation:
     require an API key or an LLM judge.
 
 Generation evaluation:
-    Uses the same RAGGenerator and LLMProvider architecture as generation.py.
-    The provider can be Ollama or Groq.
+    Uses the same RAGGenerator and local Ollama model as generation.py.
 
 Examples:
 
     Retrieval evaluation:
         python src/evaluate.py \
-            data/evaluation/golden_set.jsonl \
-            data/vector_db/AI_Engineering \
+            data/eval/golden_set.jsonl \
+            data/vector_db/book \
             --mode retrieval\
             --top-k 3 \
             -o results/retrieval_results.json
 
     Generation evaluation with Ollama:
         python src/evaluate.py \
-            data/evaluation/golden_set.jsonl \
-            data/vector_db/AI_Engineering \
-            --provider ollama \
-            --model llama3.2 \
+            data/eval/golden_set.jsonl \
+            data/vector_db/book \
+            --model phi4-mini \
             --top-k 3 \
-            -o results/llama3.2_eval.json
-
-    Generation evaluation with Groq:
-        python src/evaluate.py \
-            data/evaluation/golden_set.jsonl \
-            data/vector_db/AI_Engineering \
-            --provider groq \
-            --model llama-3.3-70b-versatile \
-            --top-k 3 \
-            -o results/groq_eval.json
+            -o results/phi4-mini_eval.json
 """
 
 from __future__ import annotations
@@ -349,16 +338,9 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--provider",
-        choices=("ollama", "groq"),
-        default=config.generation_provider,
-        help="LLM provider for generation evaluation.",
-    )
-
-    parser.add_argument(
         "--model",
         default=config.generation_model,
-        help="LLM model used for generation and judging.",
+        help="Local Ollama model used for generation and judging.",
     )
 
     parser.add_argument(
@@ -400,10 +382,7 @@ def main() -> None:
     else:
         records = load_golden_set(args.golden_set)
 
-        provider = get_provider(
-            provider=args.provider,
-            model=args.model,
-        )
+        provider = get_provider(args.model)
 
         generator = RAGGenerator(
             retriever=retriever,
@@ -411,7 +390,7 @@ def main() -> None:
         )
 
         print(f"Loaded {len(records)} golden-set question(s).")
-        print(f"Generating answers with {args.provider}/{args.model}...")
+        print(f"Generating answers with Ollama/{args.model}...")
 
         aggregate_scores, per_question = evaluate_with_generation(
             records,
