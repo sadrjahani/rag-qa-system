@@ -1,8 +1,8 @@
 """
-RAG answer generation using retrieved context and a configurable LLM provider.
+RAG answer generation using retrieved context and a local Ollama model.
 
 Example:
-python src/generation.py --top-k 3 --model phi4-mini "data/vector_db/AI Engineering" "What is RAG?"
+python src/generation.py --top-k 3 --model phi4-mini "data/vector_db/book" "What is RAG?"
 
 """
 
@@ -141,16 +141,9 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--provider",
-        choices=("ollama", "groq"),
-        default=app_config.generation_provider,
-        help="LLM provider (default: from .env)",
-    )
-
-    parser.add_argument(
         "--model",
         default=app_config.generation_model,
-        help="Model name (default: from .env)",
+        help="Local Ollama model name (default: from .env)",
     )
 
     parser.add_argument(
@@ -165,7 +158,7 @@ def main() -> None:
 
     retriever = FAISSRetriever.load(args.database)
 
-    llm = get_provider(args.provider, args.model)
+    llm = get_provider(args.model)
 
     generator = RAGGenerator(
         retriever=retriever,
@@ -179,7 +172,7 @@ def main() -> None:
 
     if args.output:
         output_data = {
-            "provider": args.provider,
+            "provider": "ollama",
             "model": args.model,
             "question": result.question,
             "answer": result.answer,
