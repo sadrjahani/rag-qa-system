@@ -1,0 +1,8 @@
+pymupdf==1.28.2
+faiss-cpu==1.15.0
+sentence-transformers==6.0.1
+python-dotenv==1.2.3
+numpy==2.5.3
+tiktoken==0.14.0
+ragas==0.3.9
+datasets==5.0.1
