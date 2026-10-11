@@ -3,10 +3,16 @@ data/
 *.pdf
 *.txt
 
+.github/agents/rag-qa-environment.agent.md
+
+
+AGENTS.md
+
 # python
 __pycache__/
 *.pyc
 .venv/
+.vscode
 venv/
 
 # environment variables / secrets
@@ -16,3 +22,13 @@ venv/
 
 
 result/
+
+.env
+data/
+results/
+*.json
+
+
+*.pdf
+index.faiss
+documents.jsonl
