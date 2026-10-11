@@ -1,8 +1,4 @@
-"""LLM provider implementations for RAGGenerator.
-
-Add new providers here without touching generation.py or RAGGenerator.
-Each provider must implement generate(prompt: str) -> str.
-"""
+"""Local Ollama adapter used by RAG answer generation."""
 
 import logging
 from typing import Protocol
@@ -25,25 +21,6 @@ class OllamaProvider:
         return self.client.generate(prompt)
 
 
-class GroqProvider:
-    def __init__(self, model: str = "llama-3.3-70b-versatile") -> None:
-        from groq import Groq
-        self.client = Groq()  # GROQ_API_KEY رو از .env می‌خونه
-        self.model = model
-
-    def generate(self, prompt: str) -> str:
-        logger.info("Generating with Groq model: %s", self.model)
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.choices[0].message.content
-
-
-def get_provider(provider: str, model: str) -> LLMProvider:
-    """Factory: provider name + model name → LLMProvider instance."""
-    if provider == "groq":
-        return GroqProvider(model=model)
-    if provider == "ollama":
-        return OllamaProvider(model=model)
-    raise ValueError(f"Unknown provider: {provider!r}. Choose 'ollama' or 'groq'.")
+def get_provider(model: str) -> LLMProvider:
+    """Return the local Ollama provider used by this project."""
+    return OllamaProvider(model=model)
