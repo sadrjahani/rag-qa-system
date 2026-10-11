@@ -3,10 +3,6 @@ data/
 *.pdf
 *.txt
 
-.github/agents/rag-qa-environment.agent.md
-
-
-AGENTS.md
 
 # python
 __pycache__/
