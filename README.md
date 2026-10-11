@@ -1,448 +1,204 @@
-# Local PDF RAG Pipeline
+# Local PDF RAG with Ollama and FAISS
 
-A local Retrieval-Augmented Generation (RAG) foundation for asking questions over PDF documents.
+A transparent, local Retrieval-Augmented Generation (RAG) pipeline for asking grounded questions about text-based PDF documents. It extracts PDF text, creates structure-aware chunks, embeds them with SentenceTransformers, stores them in a local FAISS index, retrieves relevant passages, and can generate an answer with a local Ollama model.
 
-The project implements the retrieval side of a RAG system end-to-end:
+No hosted vector database or cloud LLM is required.
 
-**PDF ingestion → text cleaning → structure-aware chunking → embeddings → FAISS vector search → ranked context retrieval → evaluation**
-
-It is intentionally designed as a small, transparent system rather than hiding the core retrieval logic behind a high-level framework. The goal is to make each stage observable, testable, and easy to experiment with before adding more advanced RAG components.
-
-> **Current scope:** The repository currently focuses on document ingestion, retrieval, and retrieval evaluation. Grounded answer generation with a local LLM is supported as an optional evaluation path and is being extended as the next stage of the project.
-
----
-## Architecture
-
-```text
-                         Offline / Indexing
-┌────────────────┐
-│   PDF files    │
-└───────┬────────┘
-        ↓
-┌────────────────────┐
-│ PDF text extraction│
-│ + cleaning         │
-└────────┬───────────┘
-         ↓
-┌────────────────────┐
-│ Structure-aware    │
-│ chunking           │
-└────────┬───────────┘
-         ↓
-┌────────────────────┐
-│ SentenceTransformer│
-│ embeddings         │
-└────────┬───────────┘
-         ↓
-┌────────────────────┐
-│ FAISS vector index │
-└────────┬───────────┘
-         ↓
-      Persisted
-     vector database
-
-
-                         Online / Query
-┌──────────────┐
-│ User question│
-└──────┬───────┘
-       ↓
-┌────────────────────┐
-│ Query embedding    │
-└────────┬───────────┘
-         ↓
-┌────────────────────┐
-│ FAISS similarity   │
-│ search             │
-└────────┬───────────┘
-         ↓
-┌────────────────────┐
-│ Top-k relevant     │
-│ chunks              │
-└────────┬───────────┘
-         ↓
-   Retrieved context
-         ↓
-┌────────────────────┐
-│ Optional grounded  │
-│ LLM generation     │
-└────────────────────┘
-```
-
----
-## Pipeline
+## What it does
 
 ```text
 PDF
-  -> cleaned text + detected headings
-  -> structure-aware overlapping chunks
-  -> embeddings + local FAISS vector database
-  -> ranked relevant source chunks
+  -> cleaned text and heading metadata
+  -> overlapping, section-aware chunks
+  -> SentenceTransformer embeddings
+  -> local FAISS vector database
+  -> top-k retrieved passages
+  -> optional grounded answer from Ollama
 ```
 
----
+The project is deliberately modular: PDF extraction, chunking, embedding, storage, retrieval, generation, and evaluation can be run and inspected independently.
 
 ## Features
 
-- **Local document processing** — no hosted vector database is required.
-- **PDF extraction and cleaning** using PyMuPDF.
-- Detection of likely headings and page information.
-- Filtering of likely headers, footers, and small-font footnotes.
-- **Structure-aware chunking** based on document sections and paragraphs.
-- Token-based chunk sizing with paragraph-level overlap.
-- **SentenceTransformer embeddings** using `all-MiniLM-L6-v2` by default.
-- **FAISS exact similarity search** using normalized inner products.
-- Cosine-similarity ranking through L2-normalized embeddings.
-- Persistent vector database with index, documents, and metadata.
-- Validation to prevent mismatches between vectors and their source documents.
-- Configurable `top_k`, chunk size, overlap, embedding model, and embedding dimension.
-- Retrieval evaluation with **RAGAS**.
-- Optional local LLM answer evaluation using **Ollama**.
-- JSON export of retrieved results and evaluation results.
-- Controlled retrieval experiments for comparing configuration changes.
-
----
-# Tech Stack
-
-| Component | Technology |
-|---|---|
-| Language | Python 3.10+ |
-| PDF processing | PyMuPDF |
-| Embeddings | SentenceTransformers |
-| Default embedding model | `all-MiniLM-L6-v2` |
-| Vector search | FAISS |
-| Similarity metric | Cosine similarity |
-| Evaluation | RAGAS |
-| Optional local LLM | Ollama |
-| Configuration | `.env` |
-| Storage format | JSONL + FAISS |
-
----
+- Local PDF extraction and noise filtering with PyMuPDF.
+- Section-aware, overlapping chunking with JSONL output.
+- Local `all-MiniLM-L6-v2` embeddings by default.
+- Exact FAISS search using cosine-similarity ranking.
+- Persisted FAISS index, aligned chunk records, and build metadata.
+- Integrity checks for embedding dimension and index/document alignment.
+- Local grounded answer generation through Ollama.
+- Retrieval and generation evaluation utilities.
 
 ## Requirements
 
 - Python 3.10 or newer.
-- A text-based PDF. Scanned/image-only PDFs need OCR before this pipeline can
-  extract useful text.
+- A text-based PDF. Run OCR first for scanned or image-only PDFs.
+- [Ollama](https://ollama.com/) only if you want answer generation or generation evaluation. Retrieval and indexing do not require Ollama.
 
-Install dependencies in this project's virtual environment:
+Install the Python dependencies in a virtual environment:
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
-The first embedding run downloads the selected SentenceTransformer model.
+For local answer generation, download the default model:
 
----
+```powershell
+ollama pull phi4-mini
+```
+
+The first embedding run also downloads the selected SentenceTransformer model.
 
 ## Configuration
 
-Create a `.env` file in the repository root:
+Copy the example file and adjust it only when needed:
+
+```powershell
+Copy-Item .env.example .env
+```
 
 ```dotenv
 EMBEDDING_MODEL_NAME=all-MiniLM-L6-v2
 EMBEDDING_DIMENSION=384
 LOG_LEVEL=INFO
+GENERATION_MODEL=phi4-mini
 ```
 
-### Why is `EMBEDDING_DIMENSION` configured explicitly?
+`EMBEDDING_DIMENSION` is validated against the actual output dimension of the embedding model. If you change the embedding model, update this value to match or remove it and rebuild the vector database. An index must always be queried with the same embedding model that created it.
 
-The embedding dimension is part of the contract between the embedding model and FAISS.
+## Data layout
 
-For example:
-
-```text
-all-MiniLM-L6-v2
-        ↓
-384-dimensional vector
-        ↓
-FAISS index dimension = 384
-```
-
-The pipeline validates the actual output dimension of the model against the configured value.
-
-If they do not match, the build stops rather than creating an incompatible vector database.
-
-This prevents a class of errors where an index is created for one embedding space but vectors from another model are inserted into it.
-
----
-
-# Data and Artifact Structure
-
-Keep source PDFs separate from generated artifacts:
+Keep inputs and generated artifacts under `data/`:
 
 ```text
 data/
-├── source/
-│   └── AI Engineering.pdf
-│
-├── cleaned/
-│   ├── AI Engineering.txt
-│   └── AI Engineering.meta.json
-│
-├── chunks/
-│   └── AI Engineering_chunks.jsonl
-│
-├── vector_db/
-│   └── AI Engineering/
-│       ├── index.faiss
-│       ├── documents.jsonl
-│       ├── metadata.json
-│       └── query_results.json
-│
-└── eval/
-    ├── golden_set.jsonl
-    ├── retrieval_results.json
-    ├── llm_results.json
-    └── iteration_top_k_report.md
+├── source/       # Original PDFs
+├── cleaned/      # Extracted text and PDF metadata
+├── chunks/       # Chunk JSONL files
+└── vector_db/    # One FAISS database directory per PDF
 ```
 
-
-`data/` is ignored by Git so that source books, generated vectors, and local experiment outputs are not accidentally committed.
-
-The pipeline maintains a clear data lineage:
+For a source file named `data/source/book.pdf`, the default pipeline outputs are:
 
 ```text
-source PDF
-    ↓
-cleaned text
-    ↓
-chunk records
-    ↓
-embeddings
-    ↓
-FAISS vector database
-    ↓
-retrieved contexts
+data/cleaned/book.txt
+data/cleaned/book.meta.json
+data/chunks/book_chunks.jsonl
+data/vector_db/book/
+├── index.faiss
+├── documents.jsonl
+└── metadata.json
 ```
 
-If chunks change, the vector database should be rebuilt.
+`data/`, `results/`, `.env`, and generated indexes are ignored by Git. Do not commit copyrighted books, embeddings, or private evaluation data. Also do not manually reorder `documents.jsonl`: its line order is aligned with FAISS vector IDs.
 
-Do not manually reorder or edit `documents.jsonl` independently of `index.faiss`, because FAISS result IDs map to documents by position.
+## Quick start
 
----
+1. Put a PDF in `data/source/`.
 
-# Quick Start
+2. Build a vector database and retrieve passages in one command:
 
-## 1. Add a PDF
+```powershell
+python src/run_pipeline.py "data\source\book.pdf" --query "What is retrieval-augmented generation?" --top-k 3
+```
 
-Place a PDF in:
+3. Query the saved database without rebuilding it:
+
+```powershell
+python src/retrieval.py "data\vector_db\book" "How does chunk overlap help retrieval?" --top-k 3
+```
+
+Example retrieval output:
 
 ```text
-data/source/
+Results for: How does chunk overlap help retrieval?
+
+1. Score: 0.7214
+   Section: Chunking strategy
+   Page: 12
+   Chunk ID: 8
+   Text: ...
 ```
 
-For example:
-
-```text
-data/source/AI Engineering.pdf
-```
-
-## 2. Build the database and retrieve immediately
+4. Generate an answer grounded in retrieved passages (requires Ollama):
 
 ```powershell
-python src/run_pipeline.py "data\source\AI Engineering.pdf" --query "What is retrieval-augmented generation?" --top-k 3
+python src/generation.py "data\vector_db\book" "What is retrieval-augmented generation?" --top-k 3
 ```
 
-The pipeline creates:
+The generator instructs the local model to use only supplied context and cite context numbers. Always inspect the returned sources before relying on an answer.
 
-```text
-data/cleaned/
-data/chunks/
-data/vector_db/AI Engineering/
-```
-
-## 3. Ask additional questions
-
-Once the vector database exists, it can be queried without rebuilding it:
+## Running individual stages
 
 ```powershell
-python src/Retrieval.py "data\vector_db\AI Engineering" "How does chunk overlap help retrieval?" --top-k 5
+# Extract text and PDF metadata
+python src/convert_pdf_to_text.py "data\source\book.pdf" -o "data\cleaned\book.txt"
+
+# Create chunks
+python src/chunking.py "data\cleaned\book.txt" -o "data\chunks\book_chunks.jsonl" --chunk-size 400 --overlap 60
+
+# Build a FAISS database
+python src/embedding.py "data\chunks\book_chunks.jsonl" -o "data\vector_db\book"
+
+# Retrieve relevant chunks
+python src/retrieval.py "data\vector_db\book" "What is RAG?" --top-k 3
 ```
 
-## 4. Save retrieval results
-
-```powershell
-python src/Retrieval.py "data\vector_db\AI Engineering" "What is RAG?" --top-k 3 --save "data\vector_db\AI Engineering\rag_results.json"
-```
-
----
-
-# Running Individual Stages
-
-The complete pipeline is recommended, but each stage can be run separately.
-
-#Extract cleaned text
-
-```powershell
-python src/convert_pdf_to_text.py "data\source\AI Engineering.pdf" -o "data\cleaned\AI Engineering.txt"
-```
-
-This also creates:
-
-```text
-data/cleaned/AI Engineering.meta.json
-```
-
-### Create chunks
-
-```powershell
-python src/chunking.py "data\cleaned\AI Engineering.txt" -o "data\chunks\AI Engineering_chunks.jsonl" --chunk-size 400 --overlap 60
-```
-
-### Build the vector database
-
-```powershell
-python src/embedding.py "data\chunks\AI Engineering_chunks.jsonl" -o "data\vector_db\AI Engineering"
-```
-
-### Retrieve
-
-```powershell
-python src/Retrieval.py "data\vector_db\AI Engineering" "What is a vector database?" --top-k 3
-```
-
----
-
-# Main Commands
-
-### Full pipeline
-
-```powershell
-python src/run_pipeline.py "data\source\book.pdf"
-```
-
-### Full pipeline + retrieval
-
-```powershell
-python src/run_pipeline.py "data\source\book.pdf" --query "Your question" --top-k 3
-```
-
-### Experiment with chunking
-
-```powershell
-python src/run_pipeline.py "data\source\book.pdf" --chunk-size 400 --overlap 60
-```
-
-### Override output locations
-
-```powershell
-python src/run_pipeline.py "data\source\book.pdf" --cleaned-dir "other\cleaned" --chunks-dir "other\chunks" --output "other\vectors\book"
-```
-
----
-## Project Modules
-
-| File | Responsibility |
-|---|---|
-| `convert_pdf_to_text.py` | PDF extraction, cleaning, heading/page metadata |
-| `chunking.py` | Structure-aware chunking and JSONL output |
-| `embedding_model.py` | Shared lazy-loading SentenceTransformer wrapper |
-| `vector_store.py` | FAISS vector-store creation, persistence, and validation |
-| `embedding.py` | Builds the vector database from chunks |
-| `Retrieval.py` | Loads the database and retrieves ranked chunks |
-| `run_pipeline.py` | Orchestrates the complete ingestion/indexing pipeline |
-| `config.py` | Shared environment configuration |
-| `ragas_nonllm_eval.py` | Free retrieval evaluation using RAGAS non-LLM metrics |
-| `evaluate.py` | Central evaluation entry point |
-
----
+Use `run_pipeline.py` for the normal workflow. Individual commands are useful when debugging a particular stage or experimenting with chunking settings.
 
 ## How retrieval works
 
-The database contains three linked files:
+The database contains three linked artifacts:
 
 ```text
-index.faiss       -> stored vectors
-documents.jsonl   -> original chunks and metadata
-metadata.json     -> model and index information
+index.faiss       -> normalized embedding vectors
+documents.jsonl   -> chunk text and metadata in vector-ID order
+metadata.json     -> model name, dimension, metric, and document count
 ```
 
-At query time:
+The question is embedded with the model recorded in `metadata.json`. FAISS performs exact inner-product search over L2-normalized vectors, which is equivalent to cosine-similarity ranking. Returned vector IDs are mapped back to the corresponding JSONL chunk records.
 
-1. The question is embedded with the same model stored in `metadata.json`.
-2. FAISS searches for the `top_k` nearest chunk vectors.
-3. Returned FAISS IDs are mapped to the corresponding JSONL chunk records.
-4. The command prints the score, section, page, chunk ID, and source text.
+`IndexFlatIP` is an appropriate, simple choice for a book or small collection of books. Consider approximate indexes only after measuring memory or latency problems on a much larger corpus.
 
-The current index uses `faiss.IndexFlatIP`. With L2-normalized embeddings,
-inner-product ranking is equivalent to cosine-similarity ranking. This exact
-search strategy is a good fit for a book or a modest collection of books.
+## Evaluation
 
-## Quality checks and troubleshooting
+Evaluation data is project-specific and intentionally not included in this repository. A golden-set JSONL record needs at least a `question` and one or more `reference_contexts`.
 
-Before trusting answers, inspect the generated artifacts:
-
-- Open samples from `data/cleaned/` and confirm headers, footers, and broken
-  text are not polluting the book content.
-- Inspect several JSONL chunks to confirm section boundaries and overlap are
-  sensible.
-- Test 15-30 questions with known answers and measure whether the correct
-  passage appears in the top 3 or top 5 results.
-- If a result is poor, investigate in this order: PDF extraction, chunking,
-  source metadata, embedding model, then retrieval settings.
-
-## Evaluate with a free local LLM
-
-The default evaluator measures retrieval with RAGAS:
+Run retrieval evaluation without an LLM judge:
 
 ```powershell
-python src/evaluate.py data/eval/golden_set.jsonl data/vector_db/AI_Engineering `
-   -o data/eval/retrieval_results.json --top-k 3
+python src/evaluate.py "data\eval\golden_set.jsonl" "data\vector_db\book" --mode retrieval --top-k 3 -o "results\retrieval_results.json"
 ```
 
-For answer-level evaluation, install [Ollama](https://ollama.com/), start it,
-and download a local model. A small model such as `llama3.2:3b` is a practical
-starting point on a laptop:
+Run local generation evaluation with Ollama:
 
 ```powershell
-ollama pull llama3.2:3b
-python src/evaluate.py data/eval/golden_set.jsonl data/vector_db/AI_Engineering `
-   --llm-model llama3.2:3b -o data/eval/llm_results.json --top-k 3
+python src/evaluate.py "data\eval\golden_set.jsonl" "data\vector_db\book" --mode generation --model phi4-mini --top-k 3 -o "results\generation_results.json"
 ```
 
-For each golden-set question, the evaluator retrieves context, asks Ollama for
-an answer with `[Context N]` citations, then asks the same local model to
-return structured scores for:
+In one controlled retrieval experiment on a 68-question internal golden set, increasing `top_k` from 3 to 5 increased context recall from `0.7305` to `0.8255`; context precision changed from `0.0445` to `0.0427`. These values describe that specific corpus and dataset, not a universal project score.
 
-- `correctness`: agreement with the reference answer
-- `faithfulness`: whether material claims are supported by retrieved context
-- `relevance`: whether the answer addresses the question
+## Project modules
 
-The output JSON contains aggregate scores and each generated answer. Use a
-separate judge model with `--ollama-url` only if you run another local Ollama
-server; the default URL is `http://localhost:11434`.
+| Module | Responsibility |
+| --- | --- |
+| `src/convert_pdf_to_text.py` | PDF extraction, cleaning, heading and page metadata |
+| `src/chunking.py` | Structure-aware chunking and JSONL output |
+| `src/embedding_model.py` | Lazy-loaded SentenceTransformer embedding backend |
+| `src/vector_store.py` | FAISS persistence and consistency checks |
+| `src/embedding.py` | Vector database construction from chunk JSONL |
+| `src/retrieval.py` | FAISS loading, query embedding, and ranked retrieval |
+| `src/generation.py` | Grounded local answer generation through Ollama |
+| `src/evaluate.py` | Retrieval and generation evaluation entry point |
+| `src/run_pipeline.py` | End-to-end PDF-to-vector-database pipeline |
 
-### Completed retrieval iteration
+## Limitations and next steps
 
-As a controlled experiment, `top_k` was changed from 3 to 5 while keeping the
-golden set, FAISS database, embedding model, and judge fixed. Context recall
-improved from `0.7305` to `0.8255`, while context precision changed from
-`0.0445` to `0.0427`. The full before/after comparison is recorded in
-[`data/eval/iteration_top_k_report.md`](data/eval/iteration_top_k_report.md).
+- Chunk sizes are measured with `tiktoken`, while the embedding model has its own tokenizer. Before indexing a large corpus, calibrate chunk size against the embedding model's maximum input length to avoid truncation.
+- Chunk records should include reliable `source`, `chapter`, and page-range metadata before combining multiple books.
+- Evaluation metrics are meaningful only when the dataset, corpus, and command are documented together.
+- Add automated tests and continuous integration before treating the project as a production service.
 
-Common issues:
+## License
 
-| Issue | Likely cause | Action |
-| --- | --- | --- |
-| Very little extracted text | PDF is scanned/image-only | Run OCR before the pipeline. |
-| `EMBEDDING_DIMENSION` mismatch | `.env` does not match the selected model | Update the model name or dimension, then rebuild the database. |
-| Retrieval results are wrong | Index and metadata came from different builds | Rebuild the complete vector database directory. |
-| Results lack source/book name | Chunk records do not yet include `source` metadata | Add source metadata before combining multiple books. |
-
-## Current scope and next steps
-
-This repository is intentionally a retrieval-focused RAG foundation. Good next
-steps are:
-
-1. Add `source`, `chapter`, and precise page-range metadata to chunks before
-   combining multiple books.
-2. Create a small evaluation set of real questions and measure Recall@3.
-3. Add an answer-generation layer that cites retrieved passages.
-4. Add metadata filters for chapter/book-specific questions.
-5. Consider reranking only if evaluation shows that top-k retrieval often
-   returns broadly related but incorrect passages.
-
-For a single book or small library, keep `IndexFlatIP`. Consider HNSW or IVF
-approximate indexes only after measured memory or latency problems at much
-larger scale.
+This project is licensed under the [MIT License](LICENSE).
